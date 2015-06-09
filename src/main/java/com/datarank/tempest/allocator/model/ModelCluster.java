@@ -156,7 +156,7 @@ public class ModelCluster {
         return forkAssigned();
     }
 
-    public ModelCluster move(ModelShard shard, ModelNode sourceNode) {
+    public ModelCluster move(final ModelShard shard, final ModelNode sourceNode) {
         if (!modelNodes.isAssigned(shard) || !modelNodes.nodeContains(sourceNode.getNodeId(), shard)) {
             return this;
         }
@@ -225,21 +225,19 @@ public class ModelCluster {
         if (operation == ModelOperation.NO_OP) {
             return true;
         }
-        boolean success = true;
         switch (operation.sourceType) {
             case UNASSIGNED:
-                success &= unassignedShards.remove(operation.modelShard);
-                success &= modelNodes.addShard(operation.destinationNode.getNodeId(), operation.modelShard);
+                if (!unassignedShards.remove(operation.modelShard)) { return false; }
+                if (!modelNodes.addShard(operation.destinationNode.getNodeId(), operation.modelShard)) { return false; }
                 break;
             case NODE:
-                success &= modelNodes.removeShard(operation.sourceNode.getNodeId(), operation.modelShard);
-                success &= modelNodes.addShard(operation.destinationNode.getNodeId(), operation.modelShard);
+                if (!modelNodes.removeShard(operation.sourceNode.getNodeId(), operation.modelShard)) { return false; }
+                if (!modelNodes.addShard(operation.destinationNode.getNodeId(), operation.modelShard)) { return false; }
                 break;
             default:
                 throw new IllegalStateException("Invalid sourceType " + operation.sourceType + " for operation.");
         }
-        success &= this.forkingOperationHistory.add(operation);
-        return success;
+        return this.forkingOperationHistory.add(operation);
     }
 
     /**
@@ -252,29 +250,26 @@ public class ModelCluster {
         if (operation == ModelOperation.NO_OP) {
             return true;
         }
-        boolean canExecute = true;
+
         ModelShard shard = operation.modelShard;
-        canExecute &= !modelNodes.nodeContains(operation.destinationNode.getNodeId(), shard);
+        if (modelNodes.nodeContains(operation.destinationNode.getNodeId(), shard)) { return false; }
         switch (operation.sourceType) {
             case UNASSIGNED:
-                canExecute &= unassignedShards.contains(shard);
-                canExecute &= !modelNodes.isAssigned(shard);
+                if (!unassignedShards.contains(shard)) { return false; }
+                if (modelNodes.isAssigned(shard)) { return false; }
                 break;
             case NODE:
-                canExecute &= !unassignedShards.contains(shard);
-                canExecute &= modelNodes.nodeContains(operation.sourceNode.getNodeId(), shard);
-                canExecute &= !modelNodes.nodeContains(operation.destinationNode.getNodeId(), shard);
+                if (unassignedShards.contains(shard)) { return false; }
+                if (!modelNodes.nodeContains(operation.sourceNode.getNodeId(), shard)) { return false; }
+                if (modelNodes.nodeContains(operation.destinationNode.getNodeId(), shard)) { return false; }
                 break;
             default:
                 throw new IllegalStateException("Invalid sourceType " + operation.sourceType + " for operation.");
         }
-        if(!canExecute) {
-            return false;
-        }
         for (ModelAllocationDecider allocationDecider : allocationDeciders) {
-            canExecute &= allocationDecider.canRelocate(this, operation);
+           if (!allocationDecider.canRelocate(this, operation)) { return false; }
         }
-        return canExecute;
+        return true;
     }
 
     /**
@@ -318,8 +313,6 @@ public class ModelCluster {
         return ModelOperation.NO_OP;
     }
     //endregion
-
-
 
     //region ElasticSearch Integration
     /**
@@ -368,7 +361,7 @@ public class ModelCluster {
         }
     }
 
-    private List<ModelAllocationDecider> buildDefaultAllocationDeciders(Settings settings) {
+    private List<ModelAllocationDecider> buildDefaultAllocationDeciders(final Settings settings) {
         List<ModelAllocationDecider> deciders = new ArrayList<>();
         deciders.add(new ModelSameShardAllocationDecider(settings));
         deciders.add(new ModelEnableAllocationDecider(settings));
@@ -395,14 +388,6 @@ public class ModelCluster {
         return modelNodes.getShardsSize() + calculateTotalSizeOfShards(unassignedShards);
     }
 
-    public long getAssignedShardsSize() {
-        return modelNodes.getShardsSize();
-    }
-
-    public long getUnassignedShardsSize() {
-        return calculateTotalSizeOfShards(unassignedShards);
-    }
-
     private long calculateTotalSizeOfShards(final Collection<ModelShard> shards) {
         long size = 0l;
         for (ModelShard shard : shards) {
@@ -421,7 +406,7 @@ public class ModelCluster {
         return clusterInfo.getShardSizes().get(key);
     }
 
-    public static double stddev(ModelCluster cluster) {
+    public static double stddev(final ModelCluster cluster) {
         double mean = cluster.getTotalShardsSize() / cluster.getNumNodes();
         double variance = 0d;
 
@@ -437,7 +422,7 @@ public class ModelCluster {
      * @param cluster
      * @return
      */
-    public static long sizeRange(ModelCluster cluster) {
+    public static long sizeRange(final ModelCluster cluster) {
         long max = Long.MIN_VALUE;
         long min = Long.MAX_VALUE;
         long size;

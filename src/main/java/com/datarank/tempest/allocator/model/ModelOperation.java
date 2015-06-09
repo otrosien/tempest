@@ -39,7 +39,7 @@ public class ModelOperation {
      * @param source
      * @param destination
      */
-    public ModelOperation (ModelShard shard, ModelNode source, ModelNode destination) {
+    public ModelOperation(final ModelShard shard, final ModelNode source, final ModelNode destination) {
         sourceType = source == null ? ModelContainerType.UNASSIGNED : ModelContainerType.NODE;
         modelShard = shard;
         sourceNode = source;
@@ -51,25 +51,25 @@ public class ModelOperation {
      * @param operation
      * @return true if the operation is valid
      */
-    public static boolean isValid(ModelOperation operation) {
+    public static boolean isValid(final ModelOperation operation) {
         if (operation == NO_OP) { return true; }
         if (operation.sourceNode != null && operation.sourceNode == operation.destinationNode) {
             // can't move a shard to the node it's already on
             return false;
         }
 
-        boolean valid = operation.destinationNode != null;
+        if (operation.destinationNode == null) { return false; }
         switch (operation.sourceType) {
             case UNASSIGNED:
-                valid &= operation.sourceNode == null;
+                if (operation.sourceNode != null) { return false; }
                 break;
             case NODE:
-                valid &= operation.sourceNode != null;
+                if (operation.sourceNode == null) { return false; }
                 break;
             default:
                 throw new IllegalStateException("Invalid sourceType " + operation.sourceType + " for operation.");
         }
-        return valid;
+        return true;
     }
 
 }

@@ -33,28 +33,28 @@ public class ModelNode {
     private List<ModelShard> shards;
     private long totalShardSize;
 
-    public ModelNode(String nodeId, Random random){
+    public ModelNode(final String nodeId, final Random random){
         this.routingNode = null;
         this.nodeId = nodeId;
         this.shards = new RandomList<>(random);
         this.totalShardSize = 0;
     }
 
-    public ModelNode(RoutingNode routingNode, Random random) {
+    public ModelNode(final RoutingNode routingNode, final Random random) {
         this.routingNode = routingNode;
         this.nodeId = routingNode.nodeId();
         this.shards = new RandomList<>(routingNode.numberOfOwningShards(), random);
         this.totalShardSize = 0l;
     }
 
-    public ModelNode(ModelNode other, Random random) {
+    public ModelNode(final ModelNode other, final Random random) {
         this.routingNode = other.getRoutingNode();
         this.nodeId = other.getNodeId();
         this.shards = new RandomList<>(other.getShards(), random);
         this.totalShardSize = other.getTotalShardSize();
     }
 
-    public boolean addShard(ModelShard shard) {
+    public boolean addShard(final ModelShard shard) {
         if (shards.add(shard)) {
             totalShardSize += shard.getSize();
             return true;
@@ -62,7 +62,7 @@ public class ModelNode {
         return false;
     }
 
-    public boolean removeShard(ModelShard shard) {
+    public boolean removeShard(final ModelShard shard) {
         if (shards.remove(shard)){
             totalShardSize -= shard.getSize();
             return true;
@@ -70,7 +70,7 @@ public class ModelNode {
         return false;
     }
 
-    public boolean contains(ModelShard shard) {
+    public boolean contains(final ModelShard shard) {
         return shards.contains(shard);
     }
 

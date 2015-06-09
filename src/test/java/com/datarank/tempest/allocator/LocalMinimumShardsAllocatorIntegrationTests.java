@@ -105,28 +105,11 @@ public class LocalMinimumShardsAllocatorIntegrationTests extends ElasticsearchIn
         RoutingNodes routingNodes = state.routingNodes();
     }
 
-    private IndexResponse indexRandom(int indexNumber) {
+    private IndexResponse indexRandom(final int indexNumber) {
         IndexRequest indexRequest = new IndexRequest("index_" + indexNumber, "type", RandomizedTest.randomAsciiOfLength(25));
         indexRequest.source("field", RandomizedTest.randomAsciiOfLengthBetween(10, 1000));
         IndexResponse response = client().index(indexRequest).actionGet();
 
         return response;
-    }
-
-    private BulkResponse buildIndexBulk(int indexNumber, int numDocs) {
-        BulkRequestBuilder bulkRequest = client().prepareBulk();
-        for (int i = 0; i < numDocs; i++) {
-            bulkRequest.add(Requests.indexRequest("test_" + indexNumber).type("type").source("field", RandomizedTest.randomAsciiOfLengthBetween(10, 1000)));
-        }
-        return client().bulk(bulkRequest.request()).actionGet();
-    }
-
-    private void assertAllocatorInstance(Settings settings, Class<? extends ShardsAllocator> clazz) throws IOException {
-        while (cluster().size() != 0) {
-            internalCluster().stopRandomDataNode();
-        }
-        internalCluster().startNode(settings);
-        ShardsAllocator instance = internalCluster().getInstance(ShardsAllocator.class);
-        assertThat(instance, instanceOf(clazz));
     }
 }

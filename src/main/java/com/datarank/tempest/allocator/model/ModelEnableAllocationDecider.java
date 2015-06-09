@@ -29,12 +29,12 @@ public class ModelEnableAllocationDecider extends ModelAllocationDecider {
     //TODO: future enhancement: respect index-level settings
     //TODO: future enhancement: respect Allocation.NEW_PRIMARIES and Allocation.PRIMARIES
 
-    protected ModelEnableAllocationDecider(Settings settings) {
+    protected ModelEnableAllocationDecider(final Settings settings) {
         super(settings);
     }
 
     @Override
-    public boolean canRelocate(ModelCluster cluster, ModelOperation operation) {
+    public boolean canRelocate(final ModelCluster cluster, final ModelOperation operation) {
         String enableAllocation = settings.get(CLUSTER_ROUTING_ALLOCATION_ENABLE, "ALL");
         return Allocation.parse(enableAllocation) != Allocation.NONE;
     }

@@ -24,7 +24,7 @@ package com.datarank.tempest.allocator.model;
 import org.elasticsearch.common.settings.Settings;
 
 public class ModelDiskThresholdDecider extends ModelAllocationDecider {
-    protected ModelDiskThresholdDecider(Settings settings) {
+    protected ModelDiskThresholdDecider(final Settings settings) {
         super(settings);
     }
 
@@ -34,7 +34,7 @@ public class ModelDiskThresholdDecider extends ModelAllocationDecider {
        it takes to move a node. When in doubt, always assume the node is in the fuller state.
      */
     @Override
-    public boolean canRelocate(ModelCluster cluster, ModelOperation operation) {
+    public boolean canRelocate(final ModelCluster cluster, final ModelOperation operation) {
        return true;
     }
 }

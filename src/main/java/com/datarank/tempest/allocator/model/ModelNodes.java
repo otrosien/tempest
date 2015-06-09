@@ -31,21 +31,21 @@ public class ModelNodes implements Iterable<ModelNode> {
     private Set<ModelShard> assignedShards;
     private long shardsSize;
 
-    public ModelNodes(Random random) {
+    public ModelNodes(final Random random) {
         nodesById = new HashMap<>();
         nodesList = new RandomList<>(random);
         assignedShards = new HashSet<>();
         shardsSize = 0l;
     }
 
-    public ModelNodes(int numNodes, Random random) {
+    public ModelNodes(final int numNodes, final Random random) {
         nodesById = new HashMap<>(numNodes);
         nodesList = new RandomList<>(numNodes, random);
         assignedShards = new HashSet<>();
         shardsSize = 0l;
     }
 
-    public ModelNodes(ModelNodes other, Random random) {
+    public ModelNodes(final ModelNodes other, final Random random) {
         nodesById = new HashMap<>();
         nodesList = new RandomList<>(other.getNumNodes(), random);
         assignedShards = new HashSet<>(other.getNumShards());
@@ -56,21 +56,21 @@ public class ModelNodes implements Iterable<ModelNode> {
         }
     }
 
-    public void add(ModelNode node) {
+    public void add(final ModelNode node) {
         nodesById.put(node.getNodeId(), node);
         nodesList.add(node);
         assignedShards.addAll(node.getShards());
         shardsSize += node.getTotalShardSize();
     }
 
-    public void remove(ModelNode node) {
+    public void remove(final ModelNode node) {
         nodesById.remove(node.getNodeId());
         nodesList.remove(node);
         assignedShards.removeAll(node.getShards());
         shardsSize -= node.getTotalShardSize();
     }
 
-    public boolean addShard(String nodeId, ModelShard shard) {
+    public boolean addShard(final String nodeId, final ModelShard shard) {
         if (!nodesById.containsKey(nodeId)) {
             throw new NoSuchElementException("Cannot find a node with id " + nodeId);
         }
@@ -82,7 +82,7 @@ public class ModelNodes implements Iterable<ModelNode> {
         return false;
     }
 
-    public boolean removeShard(String nodeId, ModelShard shard) {
+    public boolean removeShard(final String nodeId, final ModelShard shard) {
         if (!nodesById.containsKey(nodeId)) {
             throw new NoSuchElementException("Cannot find a node with id " + nodeId);
         }
@@ -94,7 +94,7 @@ public class ModelNodes implements Iterable<ModelNode> {
         return false;
     }
 
-    public ModelShard getShard(int shardId, String nodeId) {
+    public ModelShard getShard(final int shardId, final String nodeId) {
         if (!nodesById.containsKey(nodeId)) {
             throw new NoSuchElementException("Cannot find a node with id " + nodeId);
         }
@@ -107,7 +107,7 @@ public class ModelNodes implements Iterable<ModelNode> {
         return null;
     }
 
-    public boolean nodeContains(String nodeId, ModelShard shard) {
+    public boolean nodeContains(final String nodeId, final ModelShard shard) {
         if (!nodesById.containsKey(nodeId)) {
             throw new NoSuchElementException("Cannot find a node with id " + nodeId);
         }
@@ -118,7 +118,7 @@ public class ModelNodes implements Iterable<ModelNode> {
         return nodesList.iterator();
     }
 
-    public ModelNode getNode(String nodeId) {
+    public ModelNode getNode(final String nodeId) {
         return nodesById.get(nodeId);
     }
 
@@ -152,7 +152,7 @@ public class ModelNodes implements Iterable<ModelNode> {
         return nodesList.isEmpty();
     }
 
-    public boolean isAssigned(ModelShard shard) {
+    public boolean isAssigned(final ModelShard shard) {
         return assignedShards.contains(shard);
     }
 
@@ -176,7 +176,7 @@ public class ModelNodes implements Iterable<ModelNode> {
         return shardsSize;
     }
 
-    class NodeSizeComparator implements Comparator<ModelNode> {
+    public class NodeSizeComparator implements Comparator<ModelNode> {
         @Override
         public int compare(ModelNode o1, ModelNode o2) {
             return Long.compare(o1.getTotalShardSize(), o2.getTotalShardSize());

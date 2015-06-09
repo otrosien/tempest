@@ -29,7 +29,7 @@ public class ModelNodeVersionAllocationDecider extends ModelAllocationDecider {
     }
 
     @Override
-    public boolean canRelocate(ModelCluster cluster, ModelOperation operation) {
+    public boolean canRelocate(final ModelCluster cluster, final ModelOperation operation) {
         //TODO: Future enhancement.
         return true;
     }

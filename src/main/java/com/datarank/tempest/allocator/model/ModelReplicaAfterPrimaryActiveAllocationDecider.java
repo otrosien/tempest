@@ -24,10 +24,11 @@ package com.datarank.tempest.allocator.model;
 import org.elasticsearch.common.settings.Settings;
 
 public class ModelReplicaAfterPrimaryActiveAllocationDecider extends ModelAllocationDecider {
-    protected ModelReplicaAfterPrimaryActiveAllocationDecider(Settings settings) {
+    protected ModelReplicaAfterPrimaryActiveAllocationDecider(final Settings settings) {
         super(settings);
     }
-    public boolean canRelocate(ModelCluster cluster, ModelOperation operation) {
+
+    public boolean canRelocate(final ModelCluster cluster, final ModelOperation operation) {
         if (!operation.modelShard.isReplica() || cluster.getModelNodes().isAssigned(operation.modelShard.getPrimaryShard())) {
             return true;
         }

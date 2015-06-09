@@ -54,7 +54,7 @@ public class LocalMinimumShardsAllocatorTests extends ElasticsearchAllocationTes
         clusterBalances(new MaxMinBalanceAssertion());
     }
 
-    private void clusterBalances(MaxMinBalanceAssertion assertion) {
+    private void clusterBalances(final MaxMinBalanceAssertion assertion) {
         final double maxRatio = 1.5;
 
         settings = settingsBuilder()
@@ -89,7 +89,7 @@ public class LocalMinimumShardsAllocatorTests extends ElasticsearchAllocationTes
         }
     }
 
-    private ClusterState initCluster(AllocationService strategy) {
+    private ClusterState initCluster(final AllocationService strategy) {
         MetaData.Builder metaDataBuilder = MetaData.builder();
         RoutingTable.Builder routingTableBuilder = RoutingTable.builder();
 
@@ -120,7 +120,7 @@ public class LocalMinimumShardsAllocatorTests extends ElasticsearchAllocationTes
         return clusterState;
     }
 
-    private ClusterState addNode(ClusterState clusterState, AllocationService strategy) {
+    private ClusterState addNode(ClusterState clusterState, final AllocationService strategy) {
         logger.info("now, start 1 more node, check that rebalancing will happen because we set it to always");
         clusterState = ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder(clusterState.nodes())
                 .put(newNode("node" + numberOfNodes)))
@@ -137,7 +137,7 @@ public class LocalMinimumShardsAllocatorTests extends ElasticsearchAllocationTes
         return clusterState;
     }
 
-    private ClusterState removeNodes(ClusterState clusterState, AllocationService strategy) {
+    private ClusterState removeNodes(ClusterState clusterState, final AllocationService strategy) {
         logger.info("Removing half the nodes (" + (numberOfNodes + 1) / 2 + ")");
         DiscoveryNodes.Builder nodes = DiscoveryNodes.builder(clusterState.nodes());
 
@@ -170,7 +170,7 @@ public class LocalMinimumShardsAllocatorTests extends ElasticsearchAllocationTes
         return clusterState;
     }
 
-    private ClusterState rebalance(AllocationService strategy, RoutingTable routingTable, RoutingNodes routingNodes, ClusterState clusterState) {
+    private ClusterState rebalance(final AllocationService strategy, RoutingTable routingTable, RoutingNodes routingNodes, ClusterState clusterState) {
         RoutingTable prev = routingTable;
         int steps = 0;
         while (true) {
@@ -189,7 +189,7 @@ public class LocalMinimumShardsAllocatorTests extends ElasticsearchAllocationTes
         }
     }
 
-    private boolean allActive(RoutingTable routingTable) {
+    private boolean allActive(final RoutingTable routingTable) {
         for (IndexRoutingTable index: routingTable) {
             for (IndexShardRoutingTable shard: index) {
                 for (ShardRouting replica: shard) {
@@ -250,7 +250,7 @@ public class LocalMinimumShardsAllocatorTests extends ElasticsearchAllocationTes
         buildClusterInfo(sizes);
     }
 
-    private void buildClusterInfo(long[] sizes) {
+    private void buildClusterInfo(final long[] sizes) {
         ImmutableMap.Builder<String, Long> shardSizes = ImmutableMap.builder();
         for (int i = 0; i < numberOfIndices; i++) {
             for (int s = 0; s < numberOfShards[i]; s++) {
@@ -263,7 +263,7 @@ public class LocalMinimumShardsAllocatorTests extends ElasticsearchAllocationTes
     }
 
     private class MaxMinBalanceAssertion {
-        public void assertBalanced(RoutingNodes nodes, double maxRatio) {
+        public void assertBalanced(final RoutingNodes nodes, final double maxRatio) {
             assertFalse(nodes.hasUnassignedShards());
             long maxSize = Long.MIN_VALUE;
             long minSize = Long.MAX_VALUE;

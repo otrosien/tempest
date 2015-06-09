@@ -245,26 +245,26 @@ public class ModelBalancerTests {
         return node;
     }
 
-    private ModelShard buildShard(long size) {
+    private ModelShard buildShard(final long size) {
         ModelShard shard = new ModelShard(shards, size);
         shards++;
         shardSizes.put(Integer.toString(shard.getId()), size);
         return shard;
     }
 
-    private ModelShard replicate(ModelShard shard) {
+    private ModelShard replicate(final ModelShard shard) {
         ModelShard replica = buildShard(shard.getSize());
         replica.setIsReplica(true);
         replica.setPrimaryShard(shard);
         return replica;
     }
 
-    private static long giga(double size) {
+    private static long giga(final double size) {
         long giga = (long)Math.pow(10, 9);
         return (long)(size * giga);
     }
 
-    private void buildReplicateAdd(double sizeGb, int primaryNode, int replicaNode){
+    private void buildReplicateAdd(final double sizeGb, final int primaryNode, final int replicaNode){
         ModelShard primary = buildShard(giga(sizeGb));
         ModelShard replica = replicate(primary);
         this.modelNodes.addShard(Integer.toString(primaryNode), primary);

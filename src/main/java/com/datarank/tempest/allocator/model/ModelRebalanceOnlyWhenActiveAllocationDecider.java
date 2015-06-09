@@ -28,7 +28,7 @@ public class ModelRebalanceOnlyWhenActiveAllocationDecider extends ModelAllocati
         super(settings);
     }
 
-    public boolean canRelocate(ModelCluster cluster, ModelOperation operation) {
+    public boolean canRelocate(final ModelCluster cluster, final ModelOperation operation) {
         if (operation.sourceType != ModelContainerType.NODE) {
             return true;
         }

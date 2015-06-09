@@ -29,7 +29,7 @@ public class ModelFilterAllocationDecider extends ModelAllocationDecider {
     }
 
     @Override
-    public boolean canRelocate(ModelCluster cluster, ModelOperation operation) {
+    public boolean canRelocate(final ModelCluster cluster, final ModelOperation operation) {
         //TODO: Future enhancement. We can respect filter settings if we build the necessary framework.
         return true;
     }

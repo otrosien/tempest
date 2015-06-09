@@ -32,25 +32,25 @@ public class RandomList<E> implements List<E> {
     private Set<E> set;
     private Random random;
 
-    public RandomList(Random random) {
+    public RandomList(final Random random) {
         set = new HashSet<>();
         list = new ArrayList<>();
         this.random = random;
     }
 
-    public RandomList(int capacity, Random random) {
+    public RandomList(final int capacity, final Random random) {
         set = new HashSet<>(capacity);
         list = new ArrayList<>(capacity);
         this.random = random;
     }
 
-    public RandomList(RandomList other) {
+    public RandomList(final RandomList other) {
         set = new HashSet<>(other.getSet());
         list = new ArrayList<>(other.getList());
         random = other.getRandom();
     }
 
-    public RandomList(List other, Random random) {
+    public RandomList(final List other, final Random random) {
         set = new HashSet<>(other);
         list = new ArrayList<>(other);
         this.random = random;

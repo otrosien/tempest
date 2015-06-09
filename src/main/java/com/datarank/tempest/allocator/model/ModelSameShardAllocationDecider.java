@@ -30,7 +30,7 @@ public class ModelSameShardAllocationDecider extends ModelAllocationDecider {
 
     // not modeling cluster.routing.allocation.same_shard.host
     @Override
-    public boolean canRelocate(ModelCluster cluster, ModelOperation operation) {
+    public boolean canRelocate(final ModelCluster cluster,final  ModelOperation operation) {
         ModelShard primaryShard = operation.modelShard.getPrimaryShard();
         if (primaryShard != null && cluster.getModelNodes().getNode(operation.destinationNode.getNodeId()).contains(primaryShard)) {
             return false;

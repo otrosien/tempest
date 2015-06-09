@@ -49,8 +49,17 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
     public static final String SETTING_MAX_MIN_RATIO_THRESHOLD = "cluster.routing.allocation.probabilistic.range_ratio"; // goal maxNode:minNode ratio, default 1.5
     public static final String SETTING_MAX_FORKING_ITERATIONS = "cluster.routing.allocation.probabilistic.iterations"; // max number of attempts to find a better cluster, default numNodes * numShards
 
+    private RoutingNodes routingNodes;
+    private List<MutableShardRouting> ignoredUnassigned;
+    private AllocationDeciders deciders;
+    private MutableShardRouting shard;
+    private RoutingNode destinationNode;
+    private Decision nodeDecision;
+    private Decision shardDecision;
+
+
     @Inject
-    public LocalMinimumShardsAllocator(Settings settings) {
+    public LocalMinimumShardsAllocator(final Settings settings) {
         super(settings);
     }
 
@@ -75,7 +84,7 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
      * @return
      */
     @Override
-    public boolean allocateUnassigned(RoutingAllocation allocation) {
+    public boolean allocateUnassigned(final RoutingAllocation allocation) {
         if (!allocation.routingNodes().hasUnassignedShards()) {
             return false;
         }
@@ -96,7 +105,7 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
     }
 
     @Override
-    public boolean rebalance(RoutingAllocation allocation) {
+    public boolean rebalance(final RoutingAllocation allocation) {
         if (allocation.routingNodes().hasUnassignedShards() || !allocation.routingNodes().ignoredUnassigned().isEmpty()) {
             return false;
         }
@@ -127,7 +136,7 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
     }
 
     @Override
-    public boolean move(MutableShardRouting shardRouting, RoutingNode node, RoutingAllocation allocation) {
+    public boolean move(final MutableShardRouting shardRouting, final RoutingNode node, final RoutingAllocation allocation) {
         if (node.isEmpty() || !shardRouting.started()) {
             return false;
         }
@@ -143,14 +152,18 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
         return false;
     }
 
-    private boolean tryAllocateOperation(RoutingAllocation allocation, ModelOperation operation) {
-        RoutingNodes routingNodes = allocation.routingNodes();
-        List<MutableShardRouting> ignoredUnassigned = routingNodes.ignoredUnassigned();
-        AllocationDeciders deciders = allocation.deciders();
-        MutableShardRouting shard = operation.modelShard.getRoutingShard();
-        RoutingNode destinationNode = operation.destinationNode.getRoutingNode();
-        Decision nodeDecision = deciders.canAllocate(destinationNode, allocation);
-        Decision shardDecision = deciders.canAllocate(shard, destinationNode, allocation);
+    private void initialize(RoutingAllocation allocation, ModelOperation operation) {
+        routingNodes = allocation.routingNodes();
+        ignoredUnassigned = routingNodes.ignoredUnassigned();
+        deciders = allocation.deciders();
+        shard = operation.modelShard.getRoutingShard();
+        destinationNode = operation.destinationNode.getRoutingNode();
+        nodeDecision = deciders.canAllocate(destinationNode, allocation);
+        shardDecision = deciders.canAllocate(shard, destinationNode, allocation);
+    }
+
+    private boolean tryAllocateOperation(final RoutingAllocation allocation, final ModelOperation operation) {
+        initialize(allocation, operation);
 
         if (nodeDecision.type() != Decision.Type.YES || shardDecision.type() != Decision.Type.YES) {
             ignoredUnassigned.add(shard);
@@ -164,13 +177,9 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
         return true;
     }
 
-    private boolean tryRebalanceOperation(RoutingAllocation allocation, ModelOperation operation) {
-        RoutingNodes routingNodes = allocation.routingNodes();
-        AllocationDeciders deciders = allocation.deciders();
-        MutableShardRouting shard = operation.modelShard.getRoutingShard();
-        RoutingNode destinationNode = operation.destinationNode.getRoutingNode();
-        Decision nodeDecision = deciders.canAllocate(destinationNode, allocation);
-        Decision shardDecision = deciders.canAllocate(shard, destinationNode, allocation);
+    private boolean tryRebalanceOperation(final RoutingAllocation allocation, final ModelOperation operation) {
+        initialize(allocation, operation);
+
         if (nodeDecision.type() != Decision.Type.YES || shardDecision.type() != Decision.Type.YES) {
             return false;
         }

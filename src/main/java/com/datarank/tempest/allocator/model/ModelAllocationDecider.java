@@ -25,11 +25,11 @@ import org.elasticsearch.common.settings.Settings;
 
 public abstract class ModelAllocationDecider {
     protected Settings settings;
-    protected ModelAllocationDecider(Settings settings) {
+    protected ModelAllocationDecider(final Settings settings) {
         this.settings = settings;
     }
 
-    public boolean canRelocate(ModelCluster cluster, ModelOperation operation) {
+    public boolean canRelocate(final ModelCluster cluster, final ModelOperation operation) {
         return true;
     }
 }

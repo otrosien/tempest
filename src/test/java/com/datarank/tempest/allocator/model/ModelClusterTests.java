@@ -105,7 +105,7 @@ public class ModelClusterTests {
         return node;
     }
 
-    private ModelShard buildShard(long size) {
+    private ModelShard buildShard(final long size) {
         ModelShard shard = new ModelShard(shards, size);
         shards++;
         shardSizes.put(Integer.toString(shard.getId()), size);

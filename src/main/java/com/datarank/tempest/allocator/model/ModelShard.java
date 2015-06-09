@@ -74,11 +74,11 @@ public class ModelShard {
         return this.primaryShard;
     }
 
-    public void setIsReplica(boolean isReplica) {
+    public void setIsReplica(final boolean isReplica) {
         this.isReplica = isReplica;
     }
 
-    public void setPrimaryShard(ModelShard primaryShard) {
+    public void setPrimaryShard(final ModelShard primaryShard) {
         this.isReplica = this != primaryShard;
         this.primaryShard = primaryShard;
     }
