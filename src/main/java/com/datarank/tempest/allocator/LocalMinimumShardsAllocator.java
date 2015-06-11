@@ -38,6 +38,7 @@ import org.elasticsearch.cluster.routing.allocation.decider.Decision;
 import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.settings.SettingsException;
 
 import java.util.LinkedList;
 import java.util.List;
@@ -88,50 +89,62 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
         if (!allocation.routingNodes().hasUnassignedShards()) {
             return false;
         }
-        if (logger.isTraceEnabled()) {
-            logger.trace("Allocating unassigned shards.");
-        }
         boolean clusterChanged = false;
-        ModelCluster currentCluster = new ModelCluster(allocation, settings, RANDOM);
-        ModelCluster goalCluster = currentCluster.allocateUnassigned();
-        RoutingNodes.UnassignedShards unassignedShards = allocation.routingNodes().unassigned().transactionBegin();
-        unassignedShards.drain();
-        for (ModelOperation operation : goalCluster.getForkingOperationHistory()) {
-            // except for replica-primary allocation decisions, unassigned allocation is not order-strict
-            clusterChanged |= tryAllocateOperation(allocation, operation);
+        try {
+            logger.info("Allocating unassigned shards.");
+            clusterChanged = false;
+            ModelCluster currentCluster = new ModelCluster(allocation, settings, RANDOM);
+            ModelCluster goalCluster = currentCluster.allocateUnassigned();
+            RoutingNodes.UnassignedShards unassignedShards = allocation.routingNodes().unassigned().transactionBegin();
+            unassignedShards.drain();
+            for (ModelOperation operation : goalCluster.getForkingOperationHistory()) {
+                // except for replica-primary allocation decisions, unassigned allocation is not order-strict
+                clusterChanged |= tryAllocateOperation(allocation, operation);
+            }
+            allocation.routingNodes().unassigned().transactionEnd(unassignedShards);
+        } catch (Exception e) {
+            logger.warn(e.getStackTrace().toString());
         }
-        allocation.routingNodes().unassigned().transactionEnd(unassignedShards);
+        if (allocation.routingNodes().ignoredUnassigned() != null && !allocation.routingNodes().ignoredUnassigned().isEmpty()) {
+            logger.info(allocation.routingNodes().ignoredUnassigned().size() + " remaining unassigned shards.");
+        }
         return clusterChanged;
     }
 
     @Override
     public boolean rebalance(final RoutingAllocation allocation) {
+        logger.info("Rebalancing.");
         if (allocation.routingNodes().hasUnassignedShards() || !allocation.routingNodes().ignoredUnassigned().isEmpty()) {
+            logger.info(allocation.routingNodes().unassigned().size() + " unassigned shards remain, exiting rebalance.");
             return false;
         }
         boolean clusterChanged = false;
-        ModelCluster currentCluster = new ModelCluster(allocation, settings);
-        double maxMinRatioThreshold = settings.getAsDouble(SETTING_MAX_MIN_RATIO_THRESHOLD, 1.5);
-        if (ModelBalancer.evaluateBalance(currentCluster) <= maxMinRatioThreshold) {
-            // already sufficiently balanced
-            return clusterChanged;
-        }
-        if (logger.isTraceEnabled()) {
-            logger.trace("Attempting to rebalance the cluster.");
-        }
-        ModelBalancer balancer = new ModelBalancer();
-        ModelCluster candidateCluster = balancer.balance(currentCluster);
-        if (candidateCluster.getForkingOperationHistory().size() > 0) {
-            // try to move to candidateCluster through order-strict operations
-            Queue<ModelOperation> operationsToGoalCluster = new LinkedList<>(candidateCluster.getForkingOperationHistory());
-            while (!operationsToGoalCluster.isEmpty()){
-                boolean moveSucceeded = tryRebalanceOperation(allocation, operationsToGoalCluster.poll());
-                clusterChanged |= moveSucceeded;
-                if (!moveSucceeded) {
-                    break;
+        try {
+            ModelCluster currentCluster = new ModelCluster(allocation, settings);
+            double maxMinRatioThreshold = settings.getAsDouble(SETTING_MAX_MIN_RATIO_THRESHOLD, 1.5);
+            if (ModelBalancer.evaluateBalance(currentCluster) <= maxMinRatioThreshold) {
+                // already sufficiently balanced
+                logger.info("Already balanced to " + ModelBalancer.evaluateBalance(currentCluster) + ", exiting rebalance.");
+                return clusterChanged;
+            }
+            logger.info("Attempting to rebalance the cluster.");
+            ModelBalancer balancer = new ModelBalancer();
+            ModelCluster candidateCluster = balancer.balance(currentCluster);
+            if (candidateCluster.getForkingOperationHistory().size() > 0) {
+                // try to move to candidateCluster through order-strict operations
+                Queue<ModelOperation> operationsToGoalCluster = new LinkedList<>(candidateCluster.getForkingOperationHistory());
+                while (!operationsToGoalCluster.isEmpty()){
+                    boolean moveSucceeded = tryRebalanceOperation(allocation, operationsToGoalCluster.poll());
+                    clusterChanged |= moveSucceeded;
+                    if (!moveSucceeded) {
+                        break;
+                    }
                 }
             }
+        } catch (SettingsException e) {
+            logger.warn(e.getStackTrace().toString());
         }
+        logger.info("Exitting rebalance.");
         return clusterChanged;
     }
 
@@ -140,9 +153,7 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
         if (node.isEmpty() || !shardRouting.started()) {
             return false;
         }
-        if (logger.isTraceEnabled()) {
-            logger.trace("Attempting to move shard [{}] from [{}]", InternalClusterInfoService.shardIdentifierFromRouting(shardRouting), node.nodeId());
-        }
+        logger.info("Attempting to move shard [{}] from [{}]", InternalClusterInfoService.shardIdentifierFromRouting(shardRouting), node.nodeId());
         ModelCluster cluster = new ModelCluster(allocation, settings);
         ModelBalancer balancer = new ModelBalancer();
         ModelCluster candidateCluster = balancer.move(cluster, cluster.getModelNodes().getShard(shardRouting.id(), node.nodeId()), node.nodeId());
@@ -166,14 +177,13 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
         initialize(allocation, operation);
 
         if (nodeDecision.type() != Decision.Type.YES || shardDecision.type() != Decision.Type.YES) {
+            logger.info("Unable to allocate shard " + InternalClusterInfoService.shardIdentifierFromRouting(operation.modelShard.getRoutingShard()));
             ignoredUnassigned.add(shard);
             return false;
         }
 
         routingNodes.assign(shard, destinationNode.nodeId());
-        if (logger.isTraceEnabled()) {
-            logger.trace("Assigned shard [{}] to node [{}]", InternalClusterInfoService.shardIdentifierFromRouting(shard), destinationNode.nodeId());
-        }
+        logger.info("Assigned shard [{}] to node [{}]", InternalClusterInfoService.shardIdentifierFromRouting(shard), destinationNode.nodeId());
         return true;
     }
 
@@ -181,6 +191,7 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
         initialize(allocation, operation);
 
         if (nodeDecision.type() != Decision.Type.YES || shardDecision.type() != Decision.Type.YES) {
+            logger.info("Unable to move shard " + InternalClusterInfoService.shardIdentifierFromRouting(operation.modelShard.getRoutingShard()));
             return false;
         }
         if (shard.started()) {
@@ -188,9 +199,7 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
                     shard.currentNodeId(), shard.restoreSource(), shard.primary(), ShardRoutingState.INITIALIZING,
                     shard.version() + 1), destinationNode.nodeId()); // new shard is INITIALIZING
             routingNodes.relocate(shard, destinationNode.nodeId()); // old shard is RELOCATING
-            if (logger.isTraceEnabled()) {
-                logger.trace("Moved shard [{}] from node [{}] to node [{}]", InternalClusterInfoService.shardIdentifierFromRouting(shard), operation.sourceNode.getRoutingNode().nodeId(), destinationNode.nodeId());
-            }
+            logger.info("Moved shard [{}] from node [{}] to node [{}]", InternalClusterInfoService.shardIdentifierFromRouting(shard), operation.sourceNode.getRoutingNode().nodeId(), destinationNode.nodeId());
         }
         else {
             // this should never happen, but it COULD be dependent upon which AllocationDeciders are active

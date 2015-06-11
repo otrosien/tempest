@@ -138,7 +138,7 @@ public class ModelCluster {
         ModelCluster nextCluster;
         while (forkedCluster.hasUnassignedShards()) {
             nextCluster = forkedCluster.forkUnassigned();
-            if (nextCluster == null) {
+            if (nextCluster == forkedCluster) {
                 return forkedCluster;
             }
             forkedCluster = nextCluster;

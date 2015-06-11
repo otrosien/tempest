@@ -3,11 +3,11 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.datarank</groupId>
-    <artifactId>elasticsearch.plugin.allocator</artifactId>
+    <artifactId>tempest.allocator</artifactId>
     <version>1.0-SNAPSHOT</version>
     <packaging>jar</packaging>
 
-    <name>elasticsearch.plugin.allocator</name>
+    <name>tempest.allocator</name>
     <url>http://maven.apache.org</url>
 
     <properties>
@@ -76,5 +76,4 @@
             </plugin>
         </plugins>
     </build>
-
 </project>
