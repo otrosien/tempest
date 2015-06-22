@@ -28,9 +28,9 @@ import java.util.*;
  * @param <E>
  */
 public class RandomList<E> implements List<E> {
-    private List<E> list;
-    private Set<E> set;
-    private Random random;
+    private final List<E> list;
+    private final Set<E> set;
+    private final Random random;
 
     public RandomList(final Random random) {
         set = new HashSet<>();
