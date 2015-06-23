@@ -355,6 +355,18 @@ public class ModelCluster {
             unassignedShards.add(shard);
         }
 
+        for (MutableShardRouting routingShard : routingAllocation.routingNodes().ignoredUnassigned()) {
+            ModelShard shard = new ModelShard(routingShard, getShardSize(routingShard));
+            if (routingShard.primary()) {
+                primaryShards.put(shard.getShardIdentifier(), shard);
+                shard.setPrimaryShard(shard);
+            }
+            else {
+                replicaShards.put(shard.getShardIdentifier(), shard);
+            }
+            unassignedShards.add(shard);
+        }
+
         // set primaries
         for (ModelShard replica : replicaShards.values()) {
             replica.setPrimaryShard(primaryShards.get(replica.getShardIdentifier())); // replicas and primaries share ids
