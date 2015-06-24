@@ -1,10 +1,10 @@
 # Tempest
 A pluggable balancer and shards allocator for Elasticsearch that balances a cluster based on shard sizes.
 
-Elasticsearch's default allocator assigns and balances shards to nodes based on index-level and cluster-level settings. However, this approach can cause storage and memory issues when resources are limited or shared. This plugin replaces the default allocator with one that allocates and balances shards based on the sizes of the shards.
+Elasticsearch's default allocator assigns and balances shards to nodes based on index-level and cluster-level settings. However, this approach can cause storage and memory issues when resources are limited or shared with other services. The tempest plugin replaces Elasticsearch's default allocator with one that allocates and balances shards based on the cumulative shard sizes on each node in the cluster. Balancing the cluster in this manner results in drastically increased stability and performance on homogeneous clusters.
 
 # Relative Node Balancing
-The allocator attempts to minimize the ratio of the sizes of the largest node in your cluster to the smallest node in your cluster. That is, it attempts to reorganize shards on nodes such that maxNode.size() / minNode.size() is minimized until it is below the ratio specified by cluster.routing.allocation.probabilistic.range_ratio, or 1.5 by default.
+The allocator attempts to minimize the ratio of the sizes of the most full node to the least full node. That is, it attempts to distribute shards throughtout the cluster such that maxNode.size() / minNode.size() is minimized until it is below the ratio specified by cluster.routing.allocation.probabilistic.range_ratio, or 1.5 by default.
 
 # Build
 From project root directory:
@@ -24,4 +24,4 @@ From project root directory:
 (Optional) Modify the max_node_total_shard_size:min_node_total_shard_size goal ratio. Tempest will attempt to rebalance the cluster until the ratio is below the specified value. Defaults to 1.5.
 
     cluster.routing.allocation.probabilistic.iterations : 3000
-(Optional) Modify the maximum number of random move operations that will be attempted during rebalance when searching for a better balanced cluster state. Defaults to number of nodes * number of shards, where number of shards is primaries + replicas.
+(Optional) Modify the maximum number of random move operations that will be attempted during rebalance when searching for a better balanced cluster state. Defaults to (number of nodes * number of shards), where number of shards is primaries + replicas.
