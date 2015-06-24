@@ -9,7 +9,7 @@ The allocator attempts to minimize the ratio of the sizes of the largest node in
 # Build
 From project root directory:
 
-    mvn clean install
+    mvn clean package
 
 # Installation
 
