@@ -7,13 +7,17 @@ Elasticsearch's default allocator assigns and balances shards to nodes based on 
 The allocator attempts to minimize the ratio of the sizes of the most full node to the least full node. That is, it attempts to distribute shards throughtout the cluster such that maxNode.size() / minNode.size() is minimized until it is below the ratio specified by cluster.routing.allocation.probabilistic.range_ratio, or 1.5 by default.
 
 # Build
-From project root directory:
+If you prefer to build the plugin yourself rather than download from the releases page, you can do so very simply with maven. From project root directory:
 
     mvn clean package
+    
+Note that building yourself will append -SNAPSHOT to the the installable .zip file.
 
 # Installation
 
-    elasticsearch-<version>/bin/plugin -url file:///path/to/tempest/target/releases/tempest-allocator-<version>-SNAPSHOT.zip -install tempest
+Download the latest release from the releases page, then install it to your cluster using Elasticsearch's plugin script:
+
+    elasticsearch-<es_version>/bin/plugin -url file:///path/to/tempest/target/releases/tempest-allocator-<version>.zip -install tempest
 
 # Configuration (elasticsearch.yml)
 
