@@ -40,7 +40,6 @@ import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.settings.SettingsException;
-import org.omg.CORBA.INTERNAL;
 
 import java.util.*;
 
@@ -99,6 +98,7 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
 
             RoutingNodes.UnassignedShards unassignedTransaction = allocation.routingNodes().unassigned().transactionBegin();
             Set<MutableShardRouting> unassignedShards = new HashSet<>(Arrays.asList(unassignedTransaction.drain()));
+            logger.info(unassignedShards.size() + " unassigned shards before allocation.");
 
             for (ModelOperation operation : goalCluster.getForkingOperationHistory()) {
                 // except for replica-primary allocation decisions, unassigned allocation is not order-strict
@@ -107,6 +107,7 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
 
             // model may not have allocated all shards, put them in ignoredUnassigned
             for (MutableShardRouting shard : unassignedShards) {
+                logger.info("Ignoring " + InternalClusterInfoService.shardIdentifierFromRouting(shard) + ": model didn't allocate.");
                 allocation.routingNodes().ignoredUnassigned().add(shard);
             }
 
@@ -133,6 +134,11 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
         boolean clusterChanged = false;
         try {
             ModelCluster currentCluster = new ModelCluster(allocation, settings);
+            if (currentCluster.getModelNodes().size() <= 0) {
+                // can't balance if there are no data nodes
+                logger.info("No nodes in model, exiting rebalance.");
+                return false;
+            }
             double maxMinRatioThreshold = settings.getAsDouble(SETTING_MAX_MIN_RATIO_THRESHOLD, 1.5);
             if (ModelBalancer.evaluateBalance(currentCluster) <= maxMinRatioThreshold) {
                 // already sufficiently balanced
@@ -189,19 +195,22 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
     }
 
     private boolean tryAllocateOperation(final RoutingAllocation allocation, final ModelOperation operation, final Set<MutableShardRouting> unassignedShards) {
+        allocation.debugDecision(true);
         initialize(allocation, operation);
         String shardIdentifier = InternalClusterInfoService.shardIdentifierFromRouting(operation.modelShard.getRoutingShard());
 
         if (shardDecision.type() != Decision.Type.YES) {
-            logger.info("Unable to allocate " + shardIdentifier + ", ignoring.");
+            logger.info("Unable to allocate " + shardIdentifier + ": " + shardDecision + "ignoring.");
             ignoredUnassigned.add(shard);
             unassignedShards.remove(shard);
+            allocation.debugDecision(false);
             return false;
         }
 
         unassignedShards.remove(shard);
         routingNodes.assign(shard, destinationNode.nodeId());
         logger.info("Assigned shard [{}] to node [{}]", shardIdentifier, destinationNode.nodeId());
+        allocation.debugDecision(false);
         return true;
     }
 
