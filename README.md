@@ -6,6 +6,9 @@ Elasticsearch's default allocator assigns and balances shards to nodes based on 
 # Relative Node Balancing
 The allocator attempts to minimize the ratio of the sizes of the most full node to the least full node. That is, it attempts to distribute shards throughtout the cluster such that maxNode.size() / minNode.size() is minimized until it is below the ratio specified by cluster.routing.allocation.probabilistic.range_ratio, or 1.5 by default.
 
+# Elasticsearch Version Support
+Tempest is currently developed against Elasticsearch 1.4.2, but support has been tested up to Elasticsearch 1.7.1. Consequently, tempest can be used with an Elasticsearch cluster of any version in the range 1.4.2-1.7.1, and support may extend further. If there's a specific version you would like tested, please create an issue and we'll verify functionality.
+
 # Build
 If you prefer to build the plugin yourself rather than download from the releases page, you can do so very simply with maven. From project root directory:
 
