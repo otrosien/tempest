@@ -20,6 +20,16 @@
 package com.datarank.tempest.allocator;
 
 import com.carrotsearch.randomizedtesting.RandomizedTest;
+import org.elasticsearch.action.admin.cluster.node.info.NodesInfoRequest;
+import org.elasticsearch.action.admin.cluster.node.info.NodesInfoResponse;
+import org.elasticsearch.action.admin.cluster.node.stats.NodesStatsRequest;
+import org.elasticsearch.action.admin.cluster.node.stats.NodesStatsResponse;
+import org.elasticsearch.action.admin.cluster.stats.ClusterStatsIndices;
+import org.elasticsearch.action.admin.cluster.stats.ClusterStatsRequest;
+import org.elasticsearch.action.admin.cluster.stats.ClusterStatsResponse;
+import org.elasticsearch.action.admin.indices.stats.IndicesStatsRequest;
+import org.elasticsearch.action.admin.indices.stats.IndicesStatsResponse;
+import org.elasticsearch.action.admin.indices.stats.ShardStats;
 import org.elasticsearch.action.bulk.BulkRequestBuilder;
 import org.elasticsearch.action.bulk.BulkResponse;
 import org.elasticsearch.action.index.IndexRequest;
@@ -35,6 +45,7 @@ import org.junit.After;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.util.Set;
 
 import static org.elasticsearch.common.settings.ImmutableSettings.settingsBuilder;
 import static org.hamcrest.Matchers.instanceOf;
@@ -96,6 +107,42 @@ public class LocalMinimumShardsAllocatorIntegrationTests extends ElasticsearchIn
 
         refresh();
         ensureGreen("index_0", "index_1");
+    }
+
+    @Test
+    public void testSmallShardAllocation() throws IOException, InterruptedException {
+        internalCluster().ensureAtLeastNumDataNodes(2);
+        internalCluster().ensureAtMostNumDataNodes(2);
+        client().admin().indices().prepareCreate("index_0")
+                .setSettings(settingsBuilder()
+                .put("number_of_shards", 1)
+                .put("number_of_replicas", 0))
+                .execute().actionGet();
+
+        ensureGreen("index_0");
+        refresh();
+
+        for (int i = 0; i < 5000; i++) {
+            indexRandom(0);
+        }
+        refresh();
+
+        for (int i = 1; i < 10; i++) {
+            client().admin().indices().prepareCreate("index_" + i)
+                    .setSettings(settingsBuilder()
+                            .put("number_of_shards", 1)
+                            .put("number_of_replicas", 0))
+                    .execute().actionGet();
+
+            ensureGreen("index_" + i);
+            refresh();
+        }
+        IndicesStatsResponse indicesStatsResponse = client().admin().indices().stats(new IndicesStatsRequest()).actionGet();
+
+        // No easy way to get name of node a shard resides on, verify manually that small shards are evenly distributed across nodes.
+        for (ShardStats shardStats : indicesStatsResponse.getShards()) {
+            System.out.println(shardStats.getShardRouting() + ": " + shardStats.getStats().getStore().getSizeInBytes());
+        }
     }
 
     @After

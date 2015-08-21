@@ -48,6 +48,7 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
     public static final Random RANDOM = new Random();
     public static final String SETTING_MAX_MIN_RATIO_THRESHOLD = "cluster.routing.allocation.probabilistic.range_ratio"; // goal maxNode:minNode ratio, default 1.5
     public static final String SETTING_MAX_FORKING_ITERATIONS = "cluster.routing.allocation.probabilistic.iterations"; // max number of attempts to find a better cluster, default numNodes * numShards
+    public static final String SETTING_SMALL_SHARD_THRESHOLD = "cluster.routing.allocation.uniform.threshold";
 
     private RoutingNodes routingNodes;
     private List<MutableShardRouting> ignoredUnassigned;

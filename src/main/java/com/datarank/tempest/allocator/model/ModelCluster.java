@@ -21,6 +21,7 @@
  */
 package com.datarank.tempest.allocator.model;
 
+import com.datarank.tempest.allocator.LocalMinimumShardsAllocator;
 import com.datarank.tempest.allocator.RandomList;
 import org.elasticsearch.cluster.ClusterInfo;
 import org.elasticsearch.cluster.InternalClusterInfoService;
@@ -56,6 +57,7 @@ public class ModelCluster {
     private List<ModelShard> unassignedShards;
     private List<ModelAllocationDecider> allocationDeciders;
     private List<ModelOperation> forkingOperationHistory;
+    private int smallShardDestination;
 
     //region Constructors
     //TODO:SCA: remove testing constructor and mock out RoutingAllocation
@@ -69,6 +71,7 @@ public class ModelCluster {
         this.forkingOperationHistory = forkingOperationHistory;
         this.startingCluster = this;
         this.settings = settings;
+        this.smallShardDestination = 0;
         RANDOM = random;
 
         routingAllocation = null;
@@ -89,6 +92,7 @@ public class ModelCluster {
         this.settings = other.getSettings();
         this.allocationDeciders = other.getAllocationDeciders();
         this.startingCluster = other.getStartingCluster();
+        this.smallShardDestination = other.getSmallShardDestination();
     }
 
     public ModelCluster(final RoutingAllocation allocation, final Settings settings) {
@@ -97,6 +101,7 @@ public class ModelCluster {
         this.forkingOperationHistory = new ArrayList<>();
         this.settings = settings;
         this.startingCluster = this;
+        this.smallShardDestination = 0;
 
         buildModel();
     }
@@ -107,6 +112,7 @@ public class ModelCluster {
         this.forkingOperationHistory = new ArrayList<>();
         this.settings = settings;
         this.startingCluster = this;
+        this.smallShardDestination = 0;
         RANDOM = random;
 
         buildModel();
@@ -273,18 +279,37 @@ public class ModelCluster {
     }
 
     /**
-     * Finds the smallest node that the unassigned shard can be moved to.
+     * Finds a destination node for a shard. Small shards are distributed pseudo-uniformly (ModelAllocationDeciders can veto a destination
+     * node for a particular shard), larger shards are distributed according to the standard size-based randomized algorithm.
+     *
+     * The small size threshold is determined by LocalMinimumShardsAllocator.SETTING_SMALL_SHARD_THRESHOLD
      * @param shard
      * @return a ModelOperation representing a move from UNASSIGNED to the destination node.
      */
     private ModelOperation findValidRelocation(final ModelShard shard) {
         ModelOperation operation;
-        for (ModelNode destinationNode : modelNodes.getNodesSortedBySize()) {
-            operation = new ModelOperation(shard, null, destinationNode);
-            if (ModelOperation.isValid(operation) && canExecute(operation)) {
-                return operation;
+        int i = 0;
+        if (shard.getSize() < settings.getAsInt(LocalMinimumShardsAllocator.SETTING_SMALL_SHARD_THRESHOLD, 1000000)) {
+            do {
+                ModelNode destinationNode = modelNodes.getNodesList().get(smallShardDestination);
+                operation = new ModelOperation(shard, null, destinationNode);
+                if (ModelOperation.isValid(operation) && canExecute(operation)) {
+                    advanceSmallShardDestination();
+                    return operation;
+                }
+                advanceSmallShardDestination();
+                i++;
+            } while (i < modelNodes.getNumNodes());
+        }
+        else {
+            for (ModelNode destinationNode : modelNodes) {
+                operation = new ModelOperation(shard, null, destinationNode);
+                if (ModelOperation.isValid(operation) && canExecute(operation)) {
+                    return operation;
+                }
             }
         }
+
         return ModelOperation.NO_OP;
     }
 
@@ -311,6 +336,13 @@ public class ModelCluster {
             }
         }
         return ModelOperation.NO_OP;
+    }
+
+    private void advanceSmallShardDestination() {
+        smallShardDestination++;
+        if (smallShardDestination >= modelNodes.getNumNodes()) {
+            smallShardDestination = 0;
+        }
     }
     //endregion
 
@@ -448,6 +480,10 @@ public class ModelCluster {
     //endregion
 
     //region Accessors
+    public int getSmallShardDestination() {
+        return smallShardDestination;
+    }
+
     public RoutingAllocation getRoutingAllocation() {
         return routingAllocation;
     }
