@@ -74,10 +74,13 @@ public class ModelBalancer {
      * @return the energy of the cluster
      */
     public static double evaluateBalance(final ModelCluster cluster) {
+        if (cluster.getModelNodes().isEmpty()) {
+            return 1d; //no data nodes available
+        }
         ModelNode maxNode = cluster.getModelNodes().getLargestNode();
-        double maxSize = maxNode.getTotalShardSize() != 0 ? (double)maxNode.getTotalShardSize() : 1d; // avoid infinite energy
+        double maxSize = maxNode.getTotalShardSize() != 0 ? (double)maxNode.getTotalShardSize() : 1d;
         ModelNode minNode = cluster.getModelNodes().getSmallestNode();
-        double minSize = minNode.getTotalShardSize() != 0 ? (double)minNode.getTotalShardSize() : 1d; // avoid undefined energy
+        double minSize = minNode.getTotalShardSize() != 0 ? (double)minNode.getTotalShardSize() : 1d;
         return maxSize / minSize;
     }
 }
