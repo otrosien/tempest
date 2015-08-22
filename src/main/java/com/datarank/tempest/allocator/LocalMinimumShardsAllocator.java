@@ -113,11 +113,14 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
 
             allocation.routingNodes().unassigned().transactionEnd(unassignedTransaction);
         } catch (Exception e) {
-            logger.warn(e.getStackTrace().toString());
+            logger.warn("Error allocating unassigned: ", e);
+            throw e;
         }
 
         if (allocation.routingNodes().ignoredUnassigned() != null && !allocation.routingNodes().ignoredUnassigned().isEmpty()) {
             logger.info("Exiting allocateUnassigned, " + allocation.routingNodes().unassigned().size() + " unassigned shards and " + allocation.routingNodes().ignoredUnassigned().size() + " ignored unassigned shards remaining.");
+        } else {
+            logger.info("Exiting allocateUnassigned, all shards assigned.");
         }
 
         return clusterChanged;
@@ -162,8 +165,9 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
                     }
                 }
             }
-        } catch (SettingsException e) {
-            logger.warn(e.getStackTrace().toString());
+        } catch (Exception e) {
+            logger.warn("Error rebalancing: ", e);
+            throw e;
         }
         logger.info("Exiting rebalance.");
         return clusterChanged;
