@@ -124,9 +124,10 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
 
     @Override
     public boolean rebalance(final RoutingAllocation allocation) {
-        logger.info("Rebalancing.");
+        logger.info("Rebalancing, currently " + allocation.routingNodes().getRelocatingShardCount() + " shards relocating.");
 
         if (!canRebalance(allocation)) {
+            logger.info("Exiting rebalance.");
             return false;
         }
 
@@ -214,19 +215,39 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
             return false;
         }
         if (shard.started()) {
+            logger.info("Moving shard " + InternalClusterInfoService.shardIdentifierFromRouting(shard));
+            logger.info(allocation.routingTable().shardsWithState(ShardRoutingState.RELOCATING) + " shards relocating.");
+            logger.info(allocation.routingTable().shardsWithState(ShardRoutingState.INITIALIZING) + " shards initializing.");
+            logger.info(allocation.routingTable().shardsWithState(ShardRoutingState.STARTED) + " shards started.");
+            logger.info(allocation.routingTable().shardsWithState(ShardRoutingState.UNASSIGNED) + " shards unassigned.");
+
             routingNodes.assign(new MutableShardRouting(shard.index(), shard.id(), destinationNode.nodeId(),
                     shard.currentNodeId(), shard.restoreSource(), shard.primary(), ShardRoutingState.INITIALIZING,
                     shard.version() + 1), destinationNode.nodeId()); // new shard is INITIALIZING
             routingNodes.relocate(shard, destinationNode.nodeId()); // old shard is RELOCATING
             logger.info("Moved shard [{}] from node [{}] to node [{}]", InternalClusterInfoService.shardIdentifierFromRouting(shard), operation.sourceNode.getRoutingNode().nodeId(), destinationNode.nodeId());
         }
-        
+
         return true;
     }
 
     private boolean canRebalance(RoutingAllocation allocation) {
-        if (settings.getAsInt(ConcurrentRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_CLUSTER_CONCURRENT_REBALANCE, 4) <= 0 ) {
+        int allowedRebalances = settings.getAsInt(ConcurrentRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_CLUSTER_CONCURRENT_REBALANCE, 4);
+        int relocatingRoutingNodes = allocation.routingNodes().getRelocatingShardCount();
+        int relocatingRoutingTable = allocation.routingTable().shardsWithState(ShardRoutingState.RELOCATING).size();
+        logger.info("cluster_concurrent_rebalance: " + allowedRebalances);
+        logger.info("relocating shards (routingNodes): " + relocatingRoutingNodes);
+        logger.info("relocating shards (routingTable): " + relocatingRoutingTable);
+        if (allowedRebalances <= 0 ) {
             logger.info("Allowed concurrent rebalance is <= 0, exiting rebalance.");
+            return false;
+        }
+        if (relocatingRoutingNodes >= 4) {
+            logger.info("Not rebalancing [" + allocation.routingNodes().getRelocatingShardCount() +" shards relocating already] (routingNodes)");
+            return false;
+        }
+        if (relocatingRoutingTable >= 4) {
+            logger.info("Not rebalancing [" + allocation.routingNodes().getRelocatingShardCount() +" shards relocating already] (routingTable)");
             return false;
         }
         if (allocation.routingNodes().hasUnassignedShards() || !allocation.routingNodes().ignoredUnassigned().isEmpty()) {

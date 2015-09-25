@@ -36,8 +36,7 @@ public class ModelBalancer {
      */
     public ModelCluster balance(final ModelCluster cluster) {
         int maxIterations = cluster.getSettings().getAsInt(LocalMinimumShardsAllocator.SETTING_MAX_FORKING_ITERATIONS, cluster.getNumNodes() * cluster.getNumShards());
-        int maxConcurrentRebalanceOperations = cluster.getSettings().getAsInt(ConcurrentRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_CLUSTER_CONCURRENT_REBALANCE, 2);
-        maxConcurrentRebalanceOperations = maxConcurrentRebalanceOperations == -1 ? Integer.MAX_VALUE : maxConcurrentRebalanceOperations;
+        int maxConcurrentRebalanceOperations = 4;
 
         bestCluster = new ModelCluster(cluster);
         bestCluster.getForkingOperationHistory().clear();
