@@ -40,7 +40,6 @@ import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.settings.SettingsException;
-import org.omg.CORBA.INTERNAL;
 
 import java.util.*;
 
@@ -57,6 +56,7 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
     private RoutingNode destinationNode;
     private Decision nodeDecision;
     private Decision shardDecision;
+    private Decision nodeShardDecision;
 
 
     @Inject
@@ -185,7 +185,8 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
         shard = operation.modelShard.getRoutingShard();
         destinationNode = operation.destinationNode.getRoutingNode();
         nodeDecision = deciders.canAllocate(destinationNode, allocation);
-        shardDecision = deciders.canAllocate(shard, destinationNode, allocation);
+        shardDecision = deciders.canAllocate(shard, allocation);
+        nodeShardDecision = deciders.canAllocate(shard, destinationNode, allocation);
     }
 
     private boolean tryAllocateOperation(final RoutingAllocation allocation, final ModelOperation operation, final Set<MutableShardRouting> unassignedShards) {
@@ -208,7 +209,7 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
     private boolean tryRebalanceOperation(final RoutingAllocation allocation, final ModelOperation operation) {
         initialize(allocation, operation);
 
-        if (nodeDecision.type() != Decision.Type.YES || shardDecision.type() != Decision.Type.YES) {
+        if (nodeDecision.type() != Decision.Type.YES || shardDecision.type() != Decision.Type.YES || nodeShardDecision.type() != Decision.Type.YES) {
             logger.info("Unable to move shard " + InternalClusterInfoService.shardIdentifierFromRouting(operation.modelShard.getRoutingShard()));
             return false;
         }
@@ -219,11 +220,7 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
             routingNodes.relocate(shard, destinationNode.nodeId()); // old shard is RELOCATING
             logger.info("Moved shard [{}] from node [{}] to node [{}]", InternalClusterInfoService.shardIdentifierFromRouting(shard), operation.sourceNode.getRoutingNode().nodeId(), destinationNode.nodeId());
         }
-        else {
-            // this should never happen, but it COULD be dependent upon which AllocationDeciders are active
-            logger.warn("Relocating an unstarted shard " + InternalClusterInfoService.shardIdentifierFromRouting(shard));
-            routingNodes.assign(shard, routingNodes.node(destinationNode.nodeId()).nodeId());
-        }
+        
         return true;
     }
 
