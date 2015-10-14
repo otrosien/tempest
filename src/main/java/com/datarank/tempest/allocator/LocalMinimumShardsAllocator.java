@@ -23,12 +23,10 @@ package com.datarank.tempest.allocator;
 
 import com.datarank.tempest.allocator.model.ModelBalancer;
 import com.datarank.tempest.allocator.model.ModelCluster;
+import com.datarank.tempest.allocator.model.ModelContainerType;
 import com.datarank.tempest.allocator.model.ModelOperation;
 import org.elasticsearch.cluster.InternalClusterInfoService;
-import org.elasticsearch.cluster.routing.MutableShardRouting;
-import org.elasticsearch.cluster.routing.RoutingNode;
-import org.elasticsearch.cluster.routing.RoutingNodes;
-import org.elasticsearch.cluster.routing.ShardRoutingState;
+import org.elasticsearch.cluster.routing.*;
 import org.elasticsearch.cluster.routing.allocation.FailedRerouteAllocation;
 import org.elasticsearch.cluster.routing.allocation.RoutingAllocation;
 import org.elasticsearch.cluster.routing.allocation.StartedRerouteAllocation;
@@ -39,8 +37,6 @@ import org.elasticsearch.cluster.routing.allocation.decider.Decision;
 import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.common.settings.SettingsException;
-import org.omg.CORBA.INTERNAL;
 
 import java.util.*;
 
@@ -49,15 +45,8 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
     public static final String SETTING_MAX_MIN_RATIO_THRESHOLD = "cluster.routing.allocation.probabilistic.range_ratio"; // goal maxNode:minNode ratio, default 1.5
     public static final String SETTING_MAX_FORKING_ITERATIONS = "cluster.routing.allocation.probabilistic.iterations"; // max number of attempts to find a better cluster, default numNodes * numShards
     public static final String SETTING_SMALL_SHARD_THRESHOLD = "cluster.routing.allocation.uniform.threshold";
-
-    private RoutingNodes routingNodes;
-    private List<MutableShardRouting> ignoredUnassigned;
-    private AllocationDeciders deciders;
-    private MutableShardRouting shard;
-    private RoutingNode destinationNode;
-    private Decision nodeDecision;
-    private Decision shardDecision;
-
+    public static final String SETTING_ALLOW_REBALANCE = "cluster.routing.allocation.allow_rebalance";
+    public static final String SETTING_ALLOW_ALLOCATION = "cluster.routing.allocation.allow_allocation";
 
     @Inject
     public LocalMinimumShardsAllocator(final Settings settings) {
@@ -86,34 +75,36 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
      */
     @Override
     public boolean allocateUnassigned(final RoutingAllocation allocation) {
+        allocation.debugDecision(true);
         if (!allocation.routingNodes().hasUnassignedShards()) {
             return false;
         }
 
         boolean clusterChanged = false;
-        try {
-            logger.info("Allocating unassigned shards.");
-            clusterChanged = false;
-            ModelCluster currentCluster = new ModelCluster(allocation, settings, RANDOM);
-            ModelCluster goalCluster = currentCluster.allocateUnassigned();
+        logger.info("Allocating unassigned shards.");
+        clusterChanged = false;
+        ModelCluster currentCluster = new ModelCluster(allocation, settings, RANDOM);
+        ModelCluster goalCluster = currentCluster.allocateUnassigned();
 
-            RoutingNodes.UnassignedShards unassignedTransaction = allocation.routingNodes().unassigned().transactionBegin();
-            Set<MutableShardRouting> unassignedShards = new HashSet<>(Arrays.asList(unassignedTransaction.drain()));
+        RoutingNodes.UnassignedShards unassignedTransaction = allocation.routingNodes().unassigned().transactionBegin();
+        unassignedTransaction.drain();
 
-            for (ModelOperation operation : goalCluster.getForkingOperationHistory()) {
-                // except for replica-primary allocation decisions, unassigned allocation is not order-strict
-                clusterChanged |= tryAllocateOperation(allocation, operation, unassignedShards);
-            }
-
-            // model may not have allocated all shards, put them in ignoredUnassigned
-            for (MutableShardRouting shard : unassignedShards) {
-                allocation.routingNodes().ignoredUnassigned().add(shard);
-            }
-
-            allocation.routingNodes().unassigned().transactionEnd(unassignedTransaction);
-        } catch (Exception e) {
-            logger.warn(e.getStackTrace().toString());
+        Decision decision = canExecute(allocation, goalCluster.getForkingOperationHistory());
+        while (decision == Decision.NO || decision == Decision.THROTTLE) {
+            logger.warn("Unable to execute allocations, reattempting:" + decision.label());
+            goalCluster = currentCluster.allocateUnassigned();
+            decision = canExecute(allocation, goalCluster.getForkingOperationHistory());
         }
+
+        for (ModelOperation operation : goalCluster.getForkingOperationHistory()) {
+            boolean allocateSuccess = executeOperation(allocation, operation);
+            clusterChanged |= allocateSuccess;
+            if (!allocateSuccess) {
+                logger.error("Failed to execute allocations.");
+            }
+        }
+
+        allocation.routingNodes().unassigned().transactionEnd(unassignedTransaction);
 
         if (allocation.routingNodes().ignoredUnassigned() != null && !allocation.routingNodes().ignoredUnassigned().isEmpty()) {
             logger.info("Exiting allocateUnassigned, " + allocation.routingNodes().unassigned().size() + " unassigned shards and " + allocation.routingNodes().ignoredUnassigned().size() + " ignored unassigned shards remaining.");
@@ -124,40 +115,54 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
 
     @Override
     public boolean rebalance(final RoutingAllocation allocation) {
+        allocation.debugDecision(true);
         logger.info("Rebalancing.");
 
+        if (allocation.routingNodes().hasUnassignedShards() || !allocation.routingNodes().ignoredUnassigned().isEmpty()) {
+            logger.info("Detected [{}] unassigned and [{}] ignored unassigned, allocating.", allocation.routingNodes().unassigned().size(), allocation.routingNodes().ignoredUnassigned().size());
+            return allocateUnassigned(allocation);
+        }
+
         if (!canRebalance(allocation)) {
+            logger.info("Exiting rebalance.");
             return false;
         }
 
         boolean clusterChanged = false;
-        try {
-            ModelCluster currentCluster = new ModelCluster(allocation, settings);
-            double maxMinRatioThreshold = settings.getAsDouble(SETTING_MAX_MIN_RATIO_THRESHOLD, 1.5);
-            if (ModelBalancer.evaluateBalance(currentCluster) <= maxMinRatioThreshold) {
-                // already sufficiently balanced
-                logger.info("[{}] unassigned, [{}] ignored unassigned.", allocation.routingNodes().unassigned().size(), allocation.routingNodes().ignoredUnassigned().size());
-                logger.info("Already balanced to " + ModelBalancer.evaluateBalance(currentCluster) + ", exiting rebalance.");
-                return clusterChanged;
-            }
-            logger.info("Attempting to rebalance the cluster.");
+        ModelCluster currentCluster = new ModelCluster(allocation, settings);
+        double maxMinRatioThreshold = settings.getAsDouble(SETTING_MAX_MIN_RATIO_THRESHOLD, 1.5);
+        if (ModelBalancer.evaluateBalance(currentCluster) <= maxMinRatioThreshold) {
+            // already sufficiently balanced
+            logger.info("Already balanced to " + ModelBalancer.evaluateBalance(currentCluster) + ", exiting rebalance.");
+            return clusterChanged;
+        }
+        logger.info("Attempting to rebalance the cluster.");
 
-            ModelBalancer balancer = new ModelBalancer();
-            ModelCluster candidateCluster = balancer.balance(currentCluster);
-            if (candidateCluster.getForkingOperationHistory().size() > 0) {
-                // try to move to candidateCluster through order-strict operations
-                Queue<ModelOperation> operationsToGoalCluster = new LinkedList<>(candidateCluster.getForkingOperationHistory());
+        ModelBalancer balancer = new ModelBalancer();
+        ModelCluster candidateCluster = balancer.balance(currentCluster, maxMinRatioThreshold);
+        Decision decision = canExecute(allocation, candidateCluster.getForkingOperationHistory());
 
-                while (!operationsToGoalCluster.isEmpty()){
-                    boolean moveSucceeded = tryRebalanceOperation(allocation, operationsToGoalCluster.poll());
-                    clusterChanged |= moveSucceeded;
-                    if (!moveSucceeded) {
-                        break;
-                    }
+        while (decision != Decision.YES) {
+            logger.info("Could not move shards to match cluster: " + decision);
+            candidateCluster = balancer.balance(candidateCluster, maxMinRatioThreshold);
+            decision = canExecute(allocation, candidateCluster.getForkingOperationHistory());
+        }
+
+        if (candidateCluster.getForkingOperationHistory().size() > 0) {
+            // try to move to candidateCluster through order-strict operations
+            Queue<ModelOperation> operationsToGoalCluster = new LinkedList<>(candidateCluster.getForkingOperationHistory());
+
+            while (!operationsToGoalCluster.isEmpty()){
+                ModelOperation operation = operationsToGoalCluster.poll();
+                boolean moveSucceeded = executeOperation(allocation, operation);
+                clusterChanged |= moveSucceeded;
+                if (!moveSucceeded) {
+                    logger.warn("Failed to move shard [{}] from node [{}] to node [{}]",
+                            InternalClusterInfoService.shardIdentifierFromRouting(operation.modelShard.getRoutingShard()),
+                            operation.sourceNode.getNodeId(), operation.destinationNode.getNodeId());
+                    break;
                 }
             }
-        } catch (SettingsException e) {
-            logger.warn(e.getStackTrace().toString());
         }
         logger.info("Exiting rebalance.");
         return clusterChanged;
@@ -173,67 +178,106 @@ public class LocalMinimumShardsAllocator extends AbstractComponent implements Sh
         ModelBalancer balancer = new ModelBalancer();
         ModelCluster candidateCluster = balancer.move(cluster, cluster.getModelNodes().getShard(shardRouting.id(), node.nodeId()), node.nodeId());
         if (candidateCluster.getForkingOperationHistory().size() > 0) {
-            return tryRebalanceOperation(allocation, candidateCluster.getForkingOperationHistory().get(0));
+            return executeOperation(allocation, candidateCluster.getForkingOperationHistory().get(0));
         }
         return false;
     }
 
-    private void initialize(RoutingAllocation allocation, ModelOperation operation) {
-        routingNodes = allocation.routingNodes();
-        ignoredUnassigned = routingNodes.ignoredUnassigned();
-        deciders = allocation.deciders();
-        shard = operation.modelShard.getRoutingShard();
-        destinationNode = operation.destinationNode.getRoutingNode();
-        nodeDecision = deciders.canAllocate(destinationNode, allocation);
-        shardDecision = deciders.canAllocate(shard, destinationNode, allocation);
-    }
-
-    private boolean tryAllocateOperation(final RoutingAllocation allocation, final ModelOperation operation, final Set<MutableShardRouting> unassignedShards) {
-        initialize(allocation, operation);
-        String shardIdentifier = InternalClusterInfoService.shardIdentifierFromRouting(operation.modelShard.getRoutingShard());
-
-        if (shardDecision.type() != Decision.Type.YES) {
-            logger.info("Unable to allocate " + shardIdentifier + ", ignoring.");
-            ignoredUnassigned.add(shard);
-            unassignedShards.remove(shard);
-            return false;
+    private Decision canExecute(RoutingAllocation allocation, List<ModelOperation> operations) {
+        Decision decision;
+        for(ModelOperation operation : operations) {
+            decision = canExecute(allocation, operation);
+            if (decision == Decision.NO || decision == Decision.THROTTLE) {
+                return decision;
+            }
         }
 
-        unassignedShards.remove(shard);
-        routingNodes.assign(shard, destinationNode.nodeId());
-        logger.info("Assigned shard [{}] to node [{}]", shardIdentifier, destinationNode.nodeId());
-        return true;
+        return Decision.YES;
     }
 
-    private boolean tryRebalanceOperation(final RoutingAllocation allocation, final ModelOperation operation) {
-        initialize(allocation, operation);
+    private Decision canExecute(RoutingAllocation allocation, ModelOperation operation) {
+        RoutingNode destinationNode = operation.destinationNode.getRoutingNode();
+        AllocationDeciders deciders = allocation.deciders();
+        ShardRouting shard = operation.modelShard.getRoutingShard();
 
-        if (nodeDecision.type() != Decision.Type.YES || shardDecision.type() != Decision.Type.YES) {
-            logger.info("Unable to move shard " + InternalClusterInfoService.shardIdentifierFromRouting(operation.modelShard.getRoutingShard()));
-            return false;
-        }
-        if (shard.started()) {
-            routingNodes.assign(new MutableShardRouting(shard.index(), shard.id(), destinationNode.nodeId(),
-                    shard.currentNodeId(), shard.restoreSource(), shard.primary(), ShardRoutingState.INITIALIZING,
-                    shard.version() + 1), destinationNode.nodeId()); // new shard is INITIALIZING
-            routingNodes.relocate(shard, destinationNode.nodeId()); // old shard is RELOCATING
-            logger.info("Moved shard [{}] from node [{}] to node [{}]", InternalClusterInfoService.shardIdentifierFromRouting(shard), operation.sourceNode.getRoutingNode().nodeId(), destinationNode.nodeId());
+        if (operation.sourceType == ModelContainerType.UNASSIGNED) {
+            Decision clusterDecision = deciders.canAllocate(allocation);
+            if (clusterDecision == Decision.NO || clusterDecision == Decision.THROTTLE) {
+                return clusterDecision;
+            }
+            Decision nodeDecision = deciders.canAllocate(destinationNode, allocation);
+            if (nodeDecision == Decision.NO || nodeDecision == Decision.THROTTLE) {
+                return nodeDecision;
+            }
+
+
+            Decision nodeShardDecision = deciders.canAllocate(shard, destinationNode, allocation);
+            if (nodeShardDecision == Decision.NO || nodeShardDecision == Decision.THROTTLE) {
+                return nodeShardDecision;
+            }
         }
         else {
-            // this should never happen, but it COULD be dependent upon which AllocationDeciders are active
-            logger.warn("Relocating an unstarted shard " + InternalClusterInfoService.shardIdentifierFromRouting(shard));
-            routingNodes.assign(shard, routingNodes.node(destinationNode.nodeId()).nodeId());
+            if (!shard.started()) {
+                return Decision.NO;
+            }
+            Decision clusterDecision = deciders.canRebalance(shard, allocation);
+            if (clusterDecision == Decision.NO || clusterDecision == Decision.THROTTLE) {
+                return clusterDecision;
+            }
+
+            Decision shardDecision = deciders.canAllocate(shard, destinationNode, allocation);
+            if (shardDecision == Decision.NO || shardDecision == Decision.THROTTLE) {
+                return shardDecision;
+            }
         }
+
+        return Decision.YES;
+    }
+
+    private boolean executeOperation(RoutingAllocation allocation, ModelOperation operation) {
+        RoutingNode destinationNode = operation.destinationNode.getRoutingNode();
+        MutableShardRouting shard = operation.modelShard.getRoutingShard();
+        String shardIdentifier = InternalClusterInfoService.shardIdentifierFromRouting(shard);
+        RoutingNodes routingNodes = allocation.routingNodes();
+
+        if (operation.sourceType == ModelContainerType.UNASSIGNED) {
+            routingNodes.assign(shard, destinationNode.nodeId());
+            logger.info("Assigned shard [{}] to node [{}]", shardIdentifier, destinationNode.nodeId());
+            return true;
+        }
+        else {
+            if (shard.started()) {
+                routingNodes.assign(new MutableShardRouting(shard.index(), shard.id(), destinationNode.nodeId(),
+                        shard.currentNodeId(), shard.restoreSource(), shard.primary(), ShardRoutingState.INITIALIZING,
+                        shard.version() + 1), destinationNode.nodeId()); // new shard is INITIALIZING
+                routingNodes.relocate(shard, destinationNode.nodeId()); // old shard is RELOCATING
+                logger.info("Moved shard [{}] from node [{}] to node [{}]", shardIdentifier, operation.sourceNode.getRoutingNode().nodeId(), destinationNode.nodeId());
+            }
+            else {
+                logger.error("Cannot relocate unstarted shard.");
+                return false;
+            }
+        }
+
         return true;
     }
 
     private boolean canRebalance(RoutingAllocation allocation) {
-        if (settings.getAsInt(ConcurrentRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_CLUSTER_CONCURRENT_REBALANCE, 4) <= 0 ) {
-            logger.info("Allowed concurrent rebalance is <= 0, exiting rebalance.");
+        if (settings.getAsInt(ConcurrentRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_CLUSTER_CONCURRENT_REBALANCE, 4) == 0 ) {
+            logger.info("Allowed concurrent rebalance is <= 0.");
             return false;
         }
-        if (allocation.routingNodes().hasUnassignedShards() || !allocation.routingNodes().ignoredUnassigned().isEmpty()) {
-            logger.info(allocation.routingNodes().unassigned().size() + " unassigned shards and " + allocation.routingNodes().ignoredUnassigned().size() + " ignored unassigned shards remain, exiting rebalance.");
+        if (!settings.getAsBoolean(SETTING_ALLOW_REBALANCE, true)) {
+            logger.info("Rebalancing disabled.");
+            return false;
+        }
+        // batch rebalancing, don't rebalance until all moves finished
+        if (allocation.routingNodes().getRelocatingShardCount() > 0) {
+            logger.info("[{}] shards currently relocating.");
+            return false;
+        }
+        if (allocation.routingNodes().hasInactiveShards()) {
+            logger.info("Cluster currently has inactive shards.");
             return false;
         }
         return true;

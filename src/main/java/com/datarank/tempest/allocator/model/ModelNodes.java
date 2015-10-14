@@ -27,7 +27,7 @@ import java.util.*;
 
 public class ModelNodes implements Iterable<ModelNode> {
     private Map<String, ModelNode> nodesById;
-    private List<ModelNode> nodesList;
+    private List<ModelNode> nodesList; //randomized list
     private Set<ModelShard> assignedShards;
     private long shardsSize;
 

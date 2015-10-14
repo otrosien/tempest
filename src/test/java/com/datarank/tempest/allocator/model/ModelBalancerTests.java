@@ -121,7 +121,7 @@ public class ModelBalancerTests {
         int numBalances = 0;
         DateTime start = DateTime.now();
         while(ModelBalancer.evaluateBalance(bestCluster) > 1.5) {
-            bestCluster = balancer.balance(bestCluster);
+            bestCluster = balancer.balance(bestCluster, 1.5);
             numBalances++;
         }
         long runtimeMs = DateTime.now().getMillis() - start.getMillis();
@@ -177,7 +177,7 @@ public class ModelBalancerTests {
         int numBalances = 0;
         DateTime start = DateTime.now();
         while(ModelBalancer.evaluateBalance(bestCluster) > 1.5) {
-            bestCluster = balancer.balance(bestCluster);
+            bestCluster = balancer.balance(bestCluster, 1.5);
             numBalances++;
         }
         long runtimeMs = DateTime.now().getMillis() - start.getMillis();
@@ -206,7 +206,7 @@ public class ModelBalancerTests {
         cluster = cluster.allocateUnassigned();
         balancer = new ModelBalancer();
 
-        ModelCluster bestCluster = balancer.balance(cluster);
+        ModelCluster bestCluster = balancer.balance(cluster, 1.5);
 
         assertTrue(bestCluster.getUnassignedShards().isEmpty());
         // cluster should have zero energy since there exist (multiple) perfect solutions
@@ -232,7 +232,7 @@ public class ModelBalancerTests {
         cluster = new ModelCluster(clusterInfo, modelNodes, unassignedShards, allocationDeciders, modelOperations, settings, random);
         balancer = new ModelBalancer();
 
-        ModelCluster bestCluster = balancer.balance(cluster);
+        ModelCluster bestCluster = balancer.balance(cluster, 1.5);
 
         assertTrue(bestCluster.getUnassignedShards().isEmpty());
         // cluster should have zero energy since there exist (multiple) perfect solutions

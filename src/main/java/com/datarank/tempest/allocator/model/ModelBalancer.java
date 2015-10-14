@@ -26,7 +26,7 @@ import org.elasticsearch.cluster.routing.allocation.decider.ConcurrentRebalanceA
 
 public class ModelBalancer {
     private ModelCluster currentCluster;
-    private ModelCluster bestCluster;
+    private ModelCluster startingCluster;
 
     /**
      * Attempts to find a cluster up to CLUSTER_ROUTING_ALLOCATION_CLUSTER_CONCURRENT_REBALANCE operations away whose
@@ -34,30 +34,34 @@ public class ModelBalancer {
      * @param cluster
      * @return
      */
-    public ModelCluster balance(final ModelCluster cluster) {
+    public ModelCluster balance(final ModelCluster cluster, final double goalEnergy) {
         int maxIterations = cluster.getSettings().getAsInt(LocalMinimumShardsAllocator.SETTING_MAX_FORKING_ITERATIONS, cluster.getNumNodes() * cluster.getNumShards());
-        int maxConcurrentRebalanceOperations = cluster.getSettings().getAsInt(ConcurrentRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_CLUSTER_CONCURRENT_REBALANCE, 2);
+        int maxConcurrentRebalanceOperations = cluster.getSettings().getAsInt(ConcurrentRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_CLUSTER_CONCURRENT_REBALANCE, 4);
         maxConcurrentRebalanceOperations = maxConcurrentRebalanceOperations == -1 ? Integer.MAX_VALUE : maxConcurrentRebalanceOperations;
 
-        bestCluster = new ModelCluster(cluster);
-        bestCluster.getForkingOperationHistory().clear();
-        double bestEnergy = evaluateBalance(bestCluster);
-        double currentEnergy;
+        startingCluster = new ModelCluster(cluster);
+        ModelCluster bestCluster = startingCluster;
+        double bestEnergy = evaluateBalance(startingCluster);
         for (int i = 0; i < maxIterations; i++) {
-            currentCluster = bestCluster.rebalance();
-            if (currentCluster == bestCluster) {
-                // no further possible moves
-                return bestCluster;
+            currentCluster = startingCluster;
+            for (int moves = 0; moves < maxConcurrentRebalanceOperations; moves++) {
+                currentCluster = currentCluster.rebalance();
             }
-            currentEnergy = evaluateBalance(currentCluster);
-            if (currentEnergy < bestEnergy) {
+            // update startingCluster if needed
+            if (evaluateBalance(currentCluster) < bestEnergy) {
                 bestCluster = currentCluster;
-                bestEnergy = currentEnergy;
+                bestEnergy = evaluateBalance(bestCluster);
             }
-            if (bestCluster.getForkingOperationHistory().size() >= maxConcurrentRebalanceOperations) {
+
+            if (bestEnergy <= goalEnergy) {
                 return bestCluster;
             }
         }
+
+        //TODO:SCA: trim extraneous moves? How to know if a move is necessary, even if it doesn't improve the balance when removed?
+        // A: if one move is necessary for another move, LocalMinimumShardsAllocator will catch it before executing any moves and reject
+        // the goalCluster, so move trimming is a go.
+
         return bestCluster;
     }
 

@@ -55,7 +55,7 @@ public class LocalMinimumShardsAllocatorIntegrationTests extends ElasticsearchIn
     protected Settings nodeSettings(int nodeOrdinal) {
         return settingsBuilder()
                 .put(super.nodeSettings(nodeOrdinal))
-                .put(ShardsAllocatorModule.TYPE_KEY, "org.elasticsearch.cluster.routing.allocation.allocator.probabilistic.LocalMinimumShardsAllocator")
+                .put(ShardsAllocatorModule.TYPE_KEY, "com.datarank.tempest.allocator.LocalMinimumShardsAllocator")
                 .build();
     }
 

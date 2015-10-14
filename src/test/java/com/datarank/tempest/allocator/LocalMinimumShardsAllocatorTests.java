@@ -56,11 +56,13 @@ public class LocalMinimumShardsAllocatorTests extends ElasticsearchAllocationTes
 
     private void clusterBalances(final MaxMinBalanceAssertion assertion) {
         final double maxRatio = 1.5;
+        final int maxIterations = 50000;
 
         settings = settingsBuilder()
                 .put(ShardsAllocatorModule.TYPE_KEY, LocalMinimumShardsAllocator.class.getCanonicalName())
                 .put(ClusterRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ALLOW_REBALANCE, ClusterRebalanceAllocationDecider.ClusterRebalanceType.ALWAYS.toString())
                 .put(LocalMinimumShardsAllocator.SETTING_MAX_MIN_RATIO_THRESHOLD, maxRatio)
+                .put(LocalMinimumShardsAllocator.SETTING_MAX_FORKING_ITERATIONS, maxIterations)
                 .build();
 
         AllocationService strategy = new AllocationService(settings, randomAllocationDeciders(settings,

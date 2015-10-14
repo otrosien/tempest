@@ -258,6 +258,11 @@ public class ModelCluster {
         }
 
         ModelShard shard = operation.modelShard;
+        for (ModelOperation op : this.forkingOperationHistory) { // don't move the same shard twice
+            if (op.modelShard == operation.modelShard) {
+                return false;
+            }
+        }
         if (modelNodes.nodeContains(operation.destinationNode.getNodeId(), shard)) { return false; }
         switch (operation.sourceType) {
             case UNASSIGNED:
@@ -302,7 +307,7 @@ public class ModelCluster {
             } while (i < modelNodes.getNumNodes());
         }
         else {
-            for (ModelNode destinationNode : modelNodes) {
+            for (ModelNode destinationNode : modelNodes.getNodesSortedBySize()) {
                 operation = new ModelOperation(shard, null, destinationNode);
                 if (ModelOperation.isValid(operation) && canExecute(operation)) {
                     return operation;
