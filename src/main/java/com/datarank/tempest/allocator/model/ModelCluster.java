@@ -387,7 +387,7 @@ public class ModelCluster {
             unassignedShards.add(shard);
         }
 
-        for (MutableShardRouting routingShard : routingAllocation.routingNodes().ignoredUnassigned()) {
+        for (MutableShardRouting routingShard : routingAllocation.routingNodes().unassigned().ignored()) {
             ModelShard shard = new ModelShard(routingShard, getShardSize(routingShard));
             if (routingShard.primary()) {
                 primaryShards.put(shard.getShardIdentifier(), shard);

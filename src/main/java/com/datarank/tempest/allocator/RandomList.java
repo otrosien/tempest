@@ -28,31 +28,36 @@ import java.util.*;
  * @param <E>
  */
 public class RandomList<E> implements List<E> {
-    private final List<E> list;
+    private final List<E> stableList;
+    private final List<E> randomizedList;
     private final Set<E> set;
     private final Random random;
 
     public RandomList(final Random random) {
         set = new HashSet<>();
-        list = new ArrayList<>();
+        stableList = new ArrayList<>();
+        randomizedList = new ArrayList<>();
         this.random = random;
     }
 
     public RandomList(final int capacity, final Random random) {
         set = new HashSet<>(capacity);
-        list = new ArrayList<>(capacity);
+        stableList = new ArrayList<>(capacity);
+        randomizedList = new ArrayList<>(capacity);
         this.random = random;
     }
 
     public RandomList(final RandomList other) {
         set = new HashSet<>(other.getSet());
-        list = new ArrayList<>(other.getList());
+        stableList = new ArrayList<>();
+        randomizedList = new ArrayList<>(other.getRandomizedList());
         random = other.getRandom();
     }
 
     public RandomList(final List other, final Random random) {
         set = new HashSet<>(other);
-        list = new ArrayList<>(other);
+        stableList = new ArrayList<>(other);
+        randomizedList = new ArrayList<>(other);
         this.random = random;
     }
 
@@ -77,28 +82,28 @@ public class RandomList<E> implements List<E> {
      */
     @Override
     public Iterator<E> iterator() {
-        Collections.shuffle(list, random);
-        return list.iterator();
+        Collections.shuffle(randomizedList, random);
+        return randomizedList.iterator();
     }
 
     @Override
     public Object[] toArray() {
-        return list.toArray();
+        return randomizedList.toArray();
     }
 
     @Override
     public <T> T[] toArray(T[] a) {
-        return list.toArray(a);
+        return randomizedList.toArray(a);
     }
 
     @Override
     public boolean add(E e) {
-        return set.add(e) && list.add(e);
+        return set.add(e) && randomizedList.add(e);
     }
 
     @Override
     public boolean remove(Object o) {
-        return set.remove(o) && list.remove(o);
+        return set.remove(o) && randomizedList.remove(o);
     }
 
     @Override
@@ -108,7 +113,7 @@ public class RandomList<E> implements List<E> {
 
     @Override
     public boolean addAll(Collection<? extends E> c) {
-        return set.addAll(c) && list.addAll(c);
+        return set.addAll(c) && randomizedList.addAll(c);
     }
 
     @Override
@@ -118,23 +123,23 @@ public class RandomList<E> implements List<E> {
 
     @Override
     public boolean removeAll(Collection<?> c) {
-        return set.removeAll(c) && list.removeAll(c);
+        return set.removeAll(c) && randomizedList.removeAll(c);
     }
 
     @Override
     public boolean retainAll(Collection<?> c) {
-        return set.retainAll(c) && list.retainAll(c);
+        return set.retainAll(c) && randomizedList.retainAll(c);
     }
 
     @Override
     public void clear() {
         set.clear();
-        list.clear();
+        randomizedList.clear();
     }
 
     @Override
     public E get(int index) {
-        throw new UnsupportedOperationException();
+        return randomizedList.get(index);
     }
 
     @Override
@@ -178,11 +183,11 @@ public class RandomList<E> implements List<E> {
     }
 
     public E getRandomElement() {
-        return list.get(random.nextInt(list.size()));
+        return randomizedList.get(random.nextInt(randomizedList.size()));
     }
 
-    public List<E> getList(){
-        return Collections.unmodifiableList(list);
+    public List<E> getRandomizedList(){
+        return Collections.unmodifiableList(randomizedList);
     }
 
     public Set<E> getSet() {
