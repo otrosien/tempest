@@ -1,5 +1,6 @@
 package com.simplymeasured.elasticsearch.plugins.tempest.balancer
 
+import com.simplymeasured.elasticsearch.plugins.tempest.BalancerState
 import com.simplymeasured.elasticsearch.plugins.tempest.balancer.MockDeciders.sameNodeDecider
 import com.simplymeasured.elasticsearch.plugins.tempest.balancer.MockDeciders.shardAlreadyMovingDecider
 import com.simplymeasured.elasticsearch.plugins.tempest.balancer.MockDeciders.shardIdAlreadyMoving
@@ -28,6 +29,7 @@ import kotlin.jvm.internal.iterator
 class HeuristicBalancer(    settings: Settings,
                         val allocation: RoutingAllocation,
                         val clusterInfo: ClusterInfo,
+                        val balancerState: BalancerState,
                         val random: Random) : AbstractComponent(settings) {
 
     private val routingNodes: RoutingNodes = allocation.routingNodes()
@@ -41,7 +43,8 @@ class HeuristicBalancer(    settings: Settings,
     private val minimumShardMovementOverhead: Long = settings.getAsLong("tempest.balancer.minimumShardMovementOverhead", 100000000)
     private val minimumImprovementRate: Double = settings.getAsDouble("tempest.balancer.minimumImprovementRate", 0.10)
     private val maximumAllowedRiskRate: Double = settings.getAsDouble("tempest.balancer.maximumAllowedRiskRate", 1.10)
-    private val minimumImprovementScore: Double = baseModelCluster.calculateBalanceScore() * (1.0 - minimumImprovementRate).let { it * it }
+    private val initalClusterScore: Double = baseModelCluster.calculateBalanceScore()
+    private val minimumImprovementScore: Double = initalClusterScore * (1.0 - minimumImprovementRate).let { it * it }
     private val maximumAllowedRisk: Double = baseModelCluster.calculateRisk() * maximumAllowedRiskRate * maximumAllowedRiskRate
 
     private var roundRobinAllocatorIndex: Int = 0
@@ -49,10 +52,13 @@ class HeuristicBalancer(    settings: Settings,
     fun rebalance(): Boolean {
         if (!rebalancePreconditionsCheck()) { return false }
 
-        // TODO: early escape cluster looks balanced
-        val nextMoveBatch = findBestNextMoveBatch(baseModelCluster)
+        val bestMoveChain = findBestNextMoveChain(baseModelCluster)
+        val nextMoveBatch = bestMoveChain.moveBatches.first()
 
-        if (nextMoveBatch.moves.isEmpty()) { return false }
+        if (nextMoveBatch.moves.isEmpty()) {
+            balancerState.targetScore = bestMoveChain.score
+            return false
+        }
 
         for (move in nextMoveBatch.moves) {
             routingNodes.relocate(move.shard.backingShard, move.destNode.nodeId, move.shard.backingShard.expectedShardSize)
@@ -61,11 +67,11 @@ class HeuristicBalancer(    settings: Settings,
         return true
     }
 
-    fun findBestNextMoveBatch(modelCluster: ModelCluster) : MoveActionBatch {
+    fun findBestNextMoveChain(modelCluster: ModelCluster) : MoveChain {
         val goodMoveChains = findGoodMoveChains(modelCluster)
 
         if (goodMoveChains.isEmpty()) {
-            return MoveActionBatch(emptyList<MoveAction>(), 0, 0.0, modelCluster.calculateBalanceScore())
+            return MoveChain.buildOptimalMoveChain(Lists.mutable.of(MoveActionBatch(emptyList<MoveAction>(), 0, 0.0, initalClusterScore)))
         }
 
         var bestScore = Double.MAX_VALUE
@@ -79,7 +85,7 @@ class HeuristicBalancer(    settings: Settings,
         }
 
         val orderedChains = goodMoveChains.sortedBy { it.overhead / bestOverhead.toDouble() + it.risk / bestRisk + it.score / bestScore }
-        return orderedChains.first { isValidBatch(it.moveBatches.first()) }.moveBatches.first()
+        return orderedChains.first { isValidBatch(it.moveBatches.first()) }
     }
 
     private fun isValidBatch(moveBatch: MoveActionBatch): Boolean {
@@ -159,6 +165,11 @@ class HeuristicBalancer(    settings: Settings,
 
         if (concurrentRebalanceSetting == 0) {
             logger.trace("rebalance disabled")
+            return false;
+        }
+
+        if (minimumImprovementScore <= balancerState.targetScore) {
+            logger.trace("cluster appears to already be balanced")
             return false;
         }
 

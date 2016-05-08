@@ -23,11 +23,14 @@ class TempestShardsAllocator
     @Inject constructor(settings: Settings, val clusterInfoService: ClusterInfoService) :
         AbstractComponent(settings), ShardsAllocator {
 
+    val balancerState = BalancerState()
+
     override fun rebalance(allocation: RoutingAllocation): Boolean {
         return HeuristicBalancer(
                 settings,
                 allocation,
                 clusterInfoService.clusterInfo,
+                balancerState,
                 Random()).rebalance();
     }
 
@@ -37,6 +40,7 @@ class TempestShardsAllocator
                     settings,
                     allocation,
                     clusterInfoService.clusterInfo,
+                    balancerState,
                     Random()).allocateUnassigned()
         }
 
@@ -52,6 +56,7 @@ class TempestShardsAllocator
                 settings,
                 allocation,
                 clusterInfoService.clusterInfo,
+                balancerState,
                 Random()).moveShards();
     }
 

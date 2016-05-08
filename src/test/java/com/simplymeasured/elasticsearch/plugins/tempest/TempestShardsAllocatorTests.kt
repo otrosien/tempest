@@ -44,7 +44,7 @@ class TempestShardsAllocatorTests : ESAllocationTestCase() {
         val settings = Settings.settingsBuilder()
                 .put("cluster.routing.allocation.node_concurrent_recoveries", 10)
                 .put("cluster.routing.allocation.node_initial_primaries_recoveries", 10)
-                .put("cluster.routing.allocation.cluster_concurrent_rebalance", -1)
+                .put("cluster.routing.allocation.cluster_concurrent_rebalance", 8)
                 .build()
 
         val shardSizes = Maps.mutable.empty<String, Long>()
@@ -63,22 +63,25 @@ class TempestShardsAllocatorTests : ESAllocationTestCase() {
 
         routingTable.allShards().forEach { assertEquals(ShardRoutingState.STARTED, it.state()) }
         assignRandomShardSizes(routingTable, shardSizes)
+        val totalClusterSize = routingTable.allShards().map { shardSizes.get(shardIdentifierFromRouting(it)) ?: 0 }.sum()
 
         routingTable = strategy.reroute(clusterState, "reroute").routingTable()
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build()
+
+        val modelCluster = ModelCluster(clusterState.routingNodes, clusterInfoService.clusterInfo, Lists.mutable.empty(), getRandom())
+        println("Score: " + modelCluster.calculateBalanceScore())
+        println("Ratio: " + modelCluster.calculateBalanceRatio())
 
         while (clusterState.routingNodes.shardsWithState(ShardRoutingState.INITIALIZING).isEmpty().not()) {
             routingTable = strategy.applyStartedShards(clusterState, clusterState.routingNodes.shardsWithState(ShardRoutingState.INITIALIZING)).routingTable()
             clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build()
 
             val modelCluster = ModelCluster(clusterState.routingNodes, clusterInfoService.clusterInfo, Lists.mutable.empty(), getRandom())
-            println("Cluster Score: " + modelCluster.calculateBalanceScore())
-            println("Cluster Ratio: " + modelCluster.calculateBalanceRatio())
+            val overhead = clusterState.routingNodes.shardsWithState(ShardRoutingState.INITIALIZING).map { shardSizes.get(shardIdentifierFromRouting(it)) ?: 0 }.sum()
+            println("Score: " + modelCluster.calculateBalanceScore())
+            println("Ratio: " + modelCluster.calculateBalanceRatio())
+            println("Overhead: " + overhead.toDouble()/totalClusterSize)
         }
-
-        val modelCluster = ModelCluster(clusterState.routingNodes, clusterInfoService.clusterInfo, Lists.mutable.empty(), getRandom())
-        println("Cluster Score: " + modelCluster.calculateBalanceScore())
-        println("Cluster Ratio: " + modelCluster.calculateBalanceRatio())
     }
 
     protected fun createCluster(strategy: MockAllocationService): Pair<RoutingTable, ClusterState> {
@@ -130,7 +133,6 @@ class TempestShardsAllocatorTests : ESAllocationTestCase() {
         val shardSizeMap = Maps.mutable.empty<ShardId, Long>()
 
         for (shard in routingTable.allShards()) {
-            //val shardSize = shardSizeMap.getIfAbsentPut(shard.shardId(), { Math.abs(random().nextLong()) % (1024L * 1024L * 1024L * 1024L) })
             val shardSize = shardSizeMap.getIfAbsentPut(shard.shardId(), { Math.exp(20.0 + randomDouble() * 5.0).toLong() })
             shardSizes.put(shardIdentifierFromRouting(shard), shardSize)
         }
