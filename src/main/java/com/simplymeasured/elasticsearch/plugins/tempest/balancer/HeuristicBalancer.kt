@@ -38,10 +38,11 @@ class HeuristicBalancer(    settings: Settings,
     private val searchDepthSetting: Int = settings.getAsInt("tempest.balancer.searchDepth", 8)
     private val searchScaleFactor: Int = settings.getAsInt("tempest.balancer.searchScaleFactor", 1000)
     private val bestNQueueSize: Int = settings.getAsInt("tempest.balancer.searchQueueSize", 10)
-    private val minimumShardMovementOverhead: Long = 100000000
+    private val minimumShardMovementOverhead: Long = settings.getAsLong("tempest.balancer.minimumShardMovementOverhead", 100000000)
     private val minimumImprovementRate: Double = settings.getAsDouble("tempest.balancer.minimumImprovementRate", 0.10)
+    private val maximumAllowedRiskRate: Double = settings.getAsDouble("tempest.balancer.maximumAllowedRiskRate", 1.10)
     private val minimumImprovementScore: Double = baseModelCluster.calculateBalanceScore() * (1.0 - minimumImprovementRate).let { it * it }
-    private val maximumAllowedRisk: Double = baseModelCluster.calculateRisk().let { 1.21 * it }
+    private val maximumAllowedRisk: Double = baseModelCluster.calculateRisk() * maximumAllowedRiskRate * maximumAllowedRiskRate
 
     private var roundRobinAllocatorIndex: Int = 0
 
