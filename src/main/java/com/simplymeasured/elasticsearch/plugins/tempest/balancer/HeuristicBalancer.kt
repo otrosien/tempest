@@ -87,7 +87,8 @@ class HeuristicBalancer(    settings: Settings,
     }
 
     private fun isValidMove(moveAction: MoveAction): Boolean {
-        return deciders.canRebalance(moveAction.shard.backingShard, allocation).let { it.type() == Decision.Type.YES }
+        return deciders.canRebalance(moveAction.shard.backingShard, allocation).type() == Decision.Type.YES &&
+               deciders.canAllocate(moveAction.shard.backingShard, moveAction.destNode.backingNode, allocation).type() == Decision.Type.YES
     }
 
     fun findGoodMoveChains(modelCluster: ModelCluster): List<MoveChain> {
@@ -165,11 +166,7 @@ class HeuristicBalancer(    settings: Settings,
     }
 
     fun allocateUnassigned(): Boolean {
-        if (!routingNodes.hasUnassignedShards()) { return false }
-
-        // TODO - be a lot smarter when the rebalancer is finished. Ideas:
-        //        * assume average shards node sizes
-        //        * date document count + index age into account
+        if (!routingNodes.hasUnassignedShards() || routingNodes.count() <= 1) { return false }
 
         val unassignedShardsIterator = routingNodes.unassigned().iterator()
         var changed = false
@@ -182,11 +179,35 @@ class HeuristicBalancer(    settings: Settings,
             else {
                 changed = true
             }
-
         }
 
         return changed
     }
+
+    fun moveShards(): Boolean {
+        val shardsThatMustMove = Lists.mutable.ofAll(routingNodes.shards { shouldMove(it) }).shuffleThis(random)
+        val routingNodesList = routingNodes.toList()
+        var changed = false
+
+        for (shard in shardsThatMustMove) {
+            val shardSize = allocation.clusterInfo().getShardSize(shard, ShardRouting.UNAVAILABLE_EXPECTED_SHARD_SIZE)
+
+            for (attempt in 1..routingNodesList.size) {
+                val node = routingNodesList.get(roundRobinAllocatorIndex++ % routingNodesList.size)
+
+                if (deciders.canRebalance(shard, allocation).type() == Decision.Type.YES &&
+                    deciders.canAllocate(shard, node, allocation).type() == Decision.Type.YES) {
+
+                    routingNodes.initialize(shard, node.nodeId(), shardSize)
+                    changed = true
+                }
+            }
+        }
+
+        return changed
+    }
+
+    private fun shouldMove(shard: ShardRouting) = deciders.canRemain(shard, routingNodes.node(shard.currentNodeId()), allocation).type() == Decision.Type.NO
 
     private fun tryAllocation(shard: ShardRouting): Boolean {
         val routingNodesList = routingNodes.toList()

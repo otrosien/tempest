@@ -48,7 +48,11 @@ class TempestShardsAllocator
     }
 
     override fun moveShards(allocation: RoutingAllocation): Boolean {
-        return false;
+        return HeuristicBalancer(
+                settings,
+                allocation,
+                clusterInfoService.clusterInfo,
+                Random()).moveShards();
     }
 
     override fun applyStartedShards(allocation: StartedRerouteAllocation) {
