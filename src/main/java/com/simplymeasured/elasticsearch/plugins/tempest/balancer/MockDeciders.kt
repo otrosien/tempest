@@ -1,6 +1,8 @@
 package com.simplymeasured.elasticsearch.plugins.tempest.balancer
 
 import org.elasticsearch.cluster.routing.ShardRoutingState
+import org.elasticsearch.cluster.routing.allocation.decider.AllocationDecider
+import org.elasticsearch.cluster.routing.allocation.decider.FilterAllocationDecider
 
 /**
  * Created by awhite on 4/17/16.

@@ -32,7 +32,7 @@ class HeuristicBalancer(    settings: Settings,
 
     private val routingNodes: RoutingNodes = allocation.routingNodes()
     private val deciders: AllocationDeciders = allocation.deciders()
-    private val mockDeciders: List<MockDecider> = listOf(sameNodeDecider, shardAlreadyMovingDecider, shardIdAlreadyMoving)
+    private val mockDeciders: List<MockDecider> = Lists.mutable.of(sameNodeDecider, shardAlreadyMovingDecider, shardIdAlreadyMoving, MockFilterAllocationDecider(settings))
     private val baseModelCluster: ModelCluster = ModelCluster(routingNodes, clusterInfo, mockDeciders, random)
     private val concurrentRebalanceSetting: Int = settings.getAsInt(ConcurrentRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_CLUSTER_CONCURRENT_REBALANCE, 4).let { if (it == -1) 4 else it }
     private val searchDepthSetting: Int = settings.getAsInt("tempest.balancer.searchDepth", 8)

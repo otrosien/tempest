@@ -64,12 +64,13 @@ class ModelCluster private constructor(val modelNodes: List<ModelNode>, val mock
     }
 }
 
-class ModelNode(val nodeId: String, val shards: MutableList<ModelShard>, val allocationScale: Double) {
+class ModelNode(val backingNode: RoutingNode, val nodeId: String, val shards: MutableList<ModelShard>, val allocationScale: Double) {
     constructor(other: ModelNode) :
-        this(other.nodeId, other.shards.map { it.copy() }.toMutableList(), other.allocationScale)
+        this(other.backingNode, other.nodeId, other.shards.map { it.copy() }.toMutableList(), other.allocationScale)
 
     constructor(routingNode: RoutingNode, clusterInfo: ClusterInfo) :
-        this(routingNode.nodeId(),
+        this(routingNode,
+             routingNode.nodeId(),
              routingNode.copyShards().map { ModelShard(it, clusterInfo.getShardSize(it, 0)) }.toMutableList(),
              routingNode.node().attributes.getOrElse("allocation.scale", { "1.0" }).toDouble())
 
