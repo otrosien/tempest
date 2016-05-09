@@ -2,6 +2,7 @@ package com.simplymeasured.elasticsearch.plugins.tempest
 
 import com.simplymeasured.elasticsearch.plugins.tempest.balancer.HeuristicBalancer
 import com.simplymeasured.elasticsearch.plugins.tempest.balancer.MockDeciders
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.ShardSizeCalculator
 import org.eclipse.collections.impl.factory.Sets
 import org.elasticsearch.cluster.ClusterInfoService
 import org.elasticsearch.cluster.InternalClusterInfoService
@@ -26,20 +27,22 @@ class TempestShardsAllocator
     val balancerState = BalancerState()
 
     override fun rebalance(allocation: RoutingAllocation): Boolean {
+        val shardSizeCalculator = ShardSizeCalculator(settings, allocation.metaData(), clusterInfoService.clusterInfo, allocation.routingTable())
         return HeuristicBalancer(
                 settings,
                 allocation,
-                clusterInfoService.clusterInfo,
+                shardSizeCalculator,
                 balancerState,
                 Random()).rebalance();
     }
 
     override fun allocateUnassigned(allocation: RoutingAllocation): Boolean {
+        val shardSizeCalculator = ShardSizeCalculator(settings, allocation.metaData(), clusterInfoService.clusterInfo, allocation.routingTable())
         if (allocation.routingNodes().hasUnassignedShards()) {
             return HeuristicBalancer(
                     settings,
                     allocation,
-                    clusterInfoService.clusterInfo,
+                    shardSizeCalculator,
                     balancerState,
                     Random()).allocateUnassigned()
         }
@@ -52,10 +55,11 @@ class TempestShardsAllocator
     }
 
     override fun moveShards(allocation: RoutingAllocation): Boolean {
+        val shardSizeCalculator = ShardSizeCalculator(settings, allocation.metaData(), clusterInfoService.clusterInfo, allocation.routingTable())
         return HeuristicBalancer(
                 settings,
                 allocation,
-                clusterInfoService.clusterInfo,
+                shardSizeCalculator,
                 balancerState,
                 Random()).moveShards();
     }

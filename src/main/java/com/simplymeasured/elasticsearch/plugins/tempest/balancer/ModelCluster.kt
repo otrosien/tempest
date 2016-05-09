@@ -15,8 +15,8 @@ class ModelCluster private constructor(val modelNodes: List<ModelNode>, val mock
 
     val expectedUnitCapacity: Double = calculateExpectedUnitCapacity()
 
-    constructor(routingNodes: RoutingNodes, clusterInfo: ClusterInfo, mockDeciders: List<MockDecider>, random: Random) :
-        this (routingNodes.map { ModelNode(it, clusterInfo) },
+    constructor(routingNodes: RoutingNodes, shardSizeCalculator: ShardSizeCalculator, mockDeciders: List<MockDecider>, random: Random) :
+        this (routingNodes.map { ModelNode(it, shardSizeCalculator) },
               mockDeciders,
               random)
 
@@ -58,9 +58,9 @@ class ModelCluster private constructor(val modelNodes: List<ModelNode>, val mock
 
     private fun calculateExpectedUnitCapacity(): Double {
         val shards = modelNodes.flatMap { it.shards }
-        val totalShardSize = shards.map { it.size }.filterNot { it < 0 }.sum().toDouble()
-        val totalNodeCapacity = modelNodes.map { it.allocationScale }.sum()
-        return totalShardSize / totalNodeCapacity
+        val totalNodeSize = shards.map { it.estimatedSize }.filterNot { it < 0 }.sum().toDouble()
+        val totalClusterCapacity = modelNodes.map { it.allocationScale }.sum()
+        return totalNodeSize / totalClusterCapacity
     }
 }
 
@@ -68,10 +68,10 @@ class ModelNode(val backingNode: RoutingNode, val nodeId: String, val shards: Mu
     constructor(other: ModelNode) :
         this(other.backingNode, other.nodeId, other.shards.map { it.copy() }.toMutableList(), other.allocationScale)
 
-    constructor(routingNode: RoutingNode, clusterInfo: ClusterInfo) :
+    constructor(routingNode: RoutingNode, shardSizeCalculator: ShardSizeCalculator) :
         this(routingNode,
              routingNode.nodeId(),
-             routingNode.copyShards().map { ModelShard(it, clusterInfo.getShardSize(it, 0)) }.toMutableList(),
+             routingNode.copyShards().map { ModelShard(it, shardSizeCalculator.actualShardSize(it), shardSizeCalculator.estimateShardSize(it)) }.toMutableList(),
              routingNode.node().attributes.getOrElse("allocation.scale", { "1.0" }).toDouble())
 
     fun calculateNodeScore(expectedUnitCapacity: Double): Double {
@@ -80,7 +80,7 @@ class ModelNode(val backingNode: RoutingNode, val nodeId: String, val shards: Mu
         return (expectedUnitCapacity - scaledUsage).let { it * it }
     }
 
-    fun calculateUsage() : Long = shards.map { it.size }.sum()
+    fun calculateUsage() : Long = shards.map { it.estimatedSize }.sum()
 
     fun stabilizeNode() {
         val shardIterator = shards.iterator()
@@ -95,6 +95,6 @@ class ModelNode(val backingNode: RoutingNode, val nodeId: String, val shards: Mu
     }
 }
 
-data class ModelShard(val index: String, val id: Int, var state: ShardRoutingState, val primary: Boolean, val size: Long, val backingShard: ShardRouting) {
-    constructor(shardRouting: ShardRouting, size: Long) : this(shardRouting.index(), shardRouting.id(), shardRouting.state(), shardRouting.primary(), size, shardRouting)
+data class ModelShard(val index: String, val id: Int, var state: ShardRoutingState, val primary: Boolean, val size: Long, val estimatedSize: Long, val backingShard: ShardRouting) {
+    constructor(shardRouting: ShardRouting, size: Long, estimatedSize: Long) : this(shardRouting.index(), shardRouting.id(), shardRouting.state(), shardRouting.primary(), size, estimatedSize, shardRouting)
 }

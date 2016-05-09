@@ -28,14 +28,14 @@ import kotlin.jvm.internal.iterator
 
 class HeuristicBalancer(    settings: Settings,
                         val allocation: RoutingAllocation,
-                        val clusterInfo: ClusterInfo,
+                        val shardSizeCalculator: ShardSizeCalculator,
                         val balancerState: BalancerState,
                         val random: Random) : AbstractComponent(settings) {
 
     private val routingNodes: RoutingNodes = allocation.routingNodes()
     private val deciders: AllocationDeciders = allocation.deciders()
     private val mockDeciders: List<MockDecider> = Lists.mutable.of(sameNodeDecider, shardAlreadyMovingDecider, shardIdAlreadyMoving, MockFilterAllocationDecider(settings))
-    private val baseModelCluster: ModelCluster = ModelCluster(routingNodes, clusterInfo, mockDeciders, random)
+    private val baseModelCluster: ModelCluster = ModelCluster(routingNodes, shardSizeCalculator, mockDeciders, random)
     private val concurrentRebalanceSetting: Int = settings.getAsInt(ConcurrentRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_CLUSTER_CONCURRENT_REBALANCE, 4).let { if (it == -1) 4 else it }
     private val searchDepthSetting: Int = settings.getAsInt("tempest.balancer.searchDepth", 8)
     private val searchScaleFactor: Int = settings.getAsInt("tempest.balancer.searchScaleFactor", 1000)
