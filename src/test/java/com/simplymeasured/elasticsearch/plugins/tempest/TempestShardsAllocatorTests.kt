@@ -63,12 +63,16 @@ class TempestShardsAllocatorTests : ESAllocationTestCase() {
 
         routingTable.allShards().forEach { assertEquals(ShardRoutingState.STARTED, it.state()) }
         assignRandomShardSizes(routingTable, shardSizes)
-        val totalClusterSize = routingTable.allShards().map { shardSizes.get(shardIdentifierFromRouting(it)) ?: 0 }.sum()
+        val modelClusterTracker = ModelClusterTracker()
+        var modelCluster = ModelCluster(clusterState.routingNodes, clusterInfoService.clusterInfo, Lists.mutable.empty(), getRandom())
+        modelClusterTracker.add(modelCluster)
 
         routingTable = strategy.reroute(clusterState, "reroute").routingTable()
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build()
 
-        val modelCluster = ModelCluster(clusterState.routingNodes, clusterInfoService.clusterInfo, Lists.mutable.empty(), getRandom())
+
+        modelCluster = ModelCluster(clusterState.routingNodes, clusterInfoService.clusterInfo, Lists.mutable.empty(), getRandom())
+        modelClusterTracker.add(modelCluster)
         println("Score: " + modelCluster.calculateBalanceScore())
         println("Ratio: " + modelCluster.calculateBalanceRatio())
 
@@ -76,12 +80,13 @@ class TempestShardsAllocatorTests : ESAllocationTestCase() {
             routingTable = strategy.applyStartedShards(clusterState, clusterState.routingNodes.shardsWithState(ShardRoutingState.INITIALIZING)).routingTable()
             clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build()
 
-            val modelCluster = ModelCluster(clusterState.routingNodes, clusterInfoService.clusterInfo, Lists.mutable.empty(), getRandom())
-            val overhead = clusterState.routingNodes.shardsWithState(ShardRoutingState.INITIALIZING).map { shardSizes.get(shardIdentifierFromRouting(it)) ?: 0 }.sum()
+            modelCluster = ModelCluster(clusterState.routingNodes, clusterInfoService.clusterInfo, Lists.mutable.empty(), getRandom())
+            modelClusterTracker.add(modelCluster)
             println("Score: " + modelCluster.calculateBalanceScore())
             println("Ratio: " + modelCluster.calculateBalanceRatio())
-            println("Overhead: " + overhead.toDouble()/totalClusterSize)
         }
+
+        println(modelClusterTracker)
     }
 
     protected fun createCluster(strategy: MockAllocationService): Pair<RoutingTable, ClusterState> {

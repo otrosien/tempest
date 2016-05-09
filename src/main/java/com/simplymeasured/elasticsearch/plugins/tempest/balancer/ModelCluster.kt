@@ -52,9 +52,9 @@ class ModelCluster private constructor(val modelNodes: List<ModelNode>, val mock
     fun calculateRisk(): Double = modelNodes.map { it.calculateNodeScore(expectedUnitCapacity) }.max() ?: 0.0
 
     fun calculateBalanceRatio() : Double = modelNodes
-            .map { it.calculateUsage() }
-            .filter { it > 0 }
-            .let { (it.max() ?: Long.MAX_VALUE).toDouble()  / (it.min() ?: Long.MAX_VALUE).toDouble() }
+            .map { it.calculateUsage()/it.allocationScale }
+            .filter { it > 0.0 }
+            .let { (it.max() ?: Double.MAX_VALUE)  / (it.min() ?: Double.MAX_VALUE) }
 
     private fun calculateExpectedUnitCapacity(): Double {
         val shards = modelNodes.flatMap { it.shards }
