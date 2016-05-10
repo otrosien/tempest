@@ -126,6 +126,7 @@ class HeuristicBalancer(    settings: Settings,
         for (depth in 1..searchDepth) {
             val nextBatchSize = random.nextInt(maxBatchSize) + 1
             val nextMoveBatch = createRandomMoveBatch(modelCluster, nextBatchSize)
+            if (nextMoveBatch.risk > maximumAllowedRisk) { break; }
             moveBatches.add(nextMoveBatch)
         }
 
