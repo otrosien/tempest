@@ -2,6 +2,7 @@ package com.simplymeasured.elasticsearch.plugins.tempest.balancer
 
 import org.eclipse.collections.impl.factory.Lists
 import org.eclipse.collections.impl.factory.Maps
+import org.eclipse.collections.impl.factory.Sets
 import org.eclipse.collections.impl.list.mutable.CompositeFastList
 import org.eclipse.collections.impl.utility.ArrayIterate
 import org.eclipse.collections.impl.utility.LazyIterate
@@ -25,6 +26,7 @@ class ShardSizeCalculator(settings: Settings, metadata: MetaData, private val cl
     private val estimatedShardSizes = Maps.mutable.empty<ShardRouting, Long>()
     private val defaultGroup = IndexGroup()
     private val allGroup = IndexGroup()
+    private val youngIndexes = Sets.mutable.empty<String>()
 
     init {
         val indexPatterns = settings.get("tempest.balancer.groupingPatterns", "").split(",").map { safeCompile(it) }.filterNotNull()
@@ -42,6 +44,7 @@ class ShardSizeCalculator(settings: Settings, metadata: MetaData, private val cl
                 allGroup.addModel(indexMetadata)
             }
             else {
+                youngIndexes.add(indexMetadata.index)
                 indexGroup.addYoungIndex(indexMetadata)
                 allGroup.addYoungIndex(indexMetadata)
             }
@@ -66,9 +69,11 @@ class ShardSizeCalculator(settings: Settings, metadata: MetaData, private val cl
     }
 
     private fun calculateEstimatedShardSize(shardRouting: ShardRouting): Long {
+        if (!youngIndexes.contains(shardRouting.index())) { return actualShardSize(shardRouting); }
+
         val indexGroup = indexNameGroupMap.getIfAbsent(shardRouting.index, { if (defaultGroup.hasModelIndexes()) defaultGroup else allGroup })
         if (indexGroup.hasModelIndexes()) {
-            if (indexGroup.isGroupHomogeneous()) {
+            if (indexGroup.isHomogeneous()) {
                 return indexGroup.modelIndexes
                         .map { findPrimaryShardById(it, shardRouting.id) }
                         .map { clusterInfo.getShardSize(it, 0) }
@@ -106,7 +111,7 @@ class IndexGroup() {
         return modelIndexes.isNotEmpty()
     }
 
-    fun isGroupHomogeneous(): Boolean {
+    fun isHomogeneous(): Boolean {
         val allIndexes = CompositeFastList<IndexMetaData>()
         allIndexes.addComposited(modelIndexes)
         allIndexes.addComposited(youngIndexes)
