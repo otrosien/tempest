@@ -23,6 +23,7 @@ import org.elasticsearch.cluster.routing.allocation.decider.ConcurrentRebalanceA
 import org.elasticsearch.cluster.routing.allocation.decider.Decision
 import org.elasticsearch.common.component.AbstractComponent
 import org.elasticsearch.common.settings.Settings
+import org.joda.time.DateTime
 import java.util.*
 import kotlin.jvm.internal.iterator
 
@@ -41,10 +42,9 @@ class HeuristicBalancer(    settings: Settings,
     private val searchScaleFactor: Int = settings.getAsInt("tempest.balancer.searchScaleFactor", 1000)
     private val bestNQueueSize: Int = settings.getAsInt("tempest.balancer.searchQueueSize", 10)
     private val minimumShardMovementOverhead: Long = settings.getAsLong("tempest.balancer.minimumShardMovementOverhead", 100000000)
-    private val minimumImprovementRate: Double = settings.getAsDouble("tempest.balancer.minimumImprovementRate", 0.10)
     private val maximumAllowedRiskRate: Double = settings.getAsDouble("tempest.balancer.maximumAllowedRiskRate", 1.10)
+    private val forceRebalanceThresholdMinutes: Int = settings.getAsInt("tempest.balancer.forceRebalanceThresholdMinutes", 60)
     private val initalClusterScore: Double = baseModelCluster.calculateBalanceScore()
-    private val minimumImprovementScore: Double = initalClusterScore * (1.0 - minimumImprovementRate).let { it * it }
     private val maximumAllowedRisk: Double = baseModelCluster.calculateRisk() * maximumAllowedRiskRate * maximumAllowedRiskRate
 
     private var roundRobinAllocatorIndex: Int = 0
@@ -56,7 +56,8 @@ class HeuristicBalancer(    settings: Settings,
         val nextMoveBatch = bestMoveChain.moveBatches.first()
 
         if (nextMoveBatch.moves.isEmpty()) {
-            balancerState.targetScore = bestMoveChain.score
+            balancerState.lastStableStructuralHash = baseModelCluster.calculateStructuralHash()
+            balancerState.lastFailedRebalanceTimestamp = DateTime.now()
             return false
         }
 
@@ -107,7 +108,7 @@ class HeuristicBalancer(    settings: Settings,
                 val hypotheticalCluster = ModelCluster(modelCluster)
                 val moveChain = createRandomMoveChain(hypotheticalCluster, concurrentRebalanceSetting, searchDepthSetting)
 
-                if (    moveChain.score <= minimumImprovementScore &&
+                if (    moveChain.score < initalClusterScore &&
                         moveChain.risk <= maximumAllowedRisk &&
                         bestNQueue.tryAdd(moveChain)) {
                     searchCounter.reset()
@@ -116,7 +117,7 @@ class HeuristicBalancer(    settings: Settings,
             searchCounter.increment()
         }
 
-        return bestNQueue.asList().filter { it.score <= minimumImprovementScore && it.risk <= maximumAllowedRisk }
+        return bestNQueue.asList().filter { it.risk <= maximumAllowedRisk }
     }
 
     fun createRandomMoveChain(modelCluster: ModelCluster, maxBatchSize: Int, searchDepth: Int): MoveChain {
@@ -168,7 +169,12 @@ class HeuristicBalancer(    settings: Settings,
             return false;
         }
 
-        if (minimumImprovementScore <= balancerState.targetScore) {
+        if (DateTime.now().minusMinutes(forceRebalanceThresholdMinutes).isAfter(balancerState.lastFailedRebalanceTimestamp) ) {
+            logger.trace("forcing rebalance due to time threshold expiration")
+            return true;
+        }
+
+        if (baseModelCluster.calculateStructuralHash() == balancerState.lastStableStructuralHash ) {
             logger.trace("cluster appears to already be balanced")
             return false;
         }

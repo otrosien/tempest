@@ -62,6 +62,12 @@ class ModelCluster private constructor(val modelNodes: List<ModelNode>, val mock
         val totalClusterCapacity = modelNodes.map { it.allocationScale }.sum()
         return totalNodeSize / totalClusterCapacity
     }
+
+    fun calculateStructuralHash(): Int = modelNodes.flatMap { it.shards }
+                                                   .map { "${it.backingShard.currentNodeId()}-${it.backingShard.index}-${it.backingShard.id}" }
+                                                   .toList()
+                                                   .sorted()
+                                                   .hashCode()
 }
 
 class ModelNode(val backingNode: RoutingNode, val nodeId: String, val shards: MutableList<ModelShard>, val allocationScale: Double) {
