@@ -1,9 +1,15 @@
 package com.simplymeasured.elasticsearch.plugins.tempest.balancer
 
+import org.eclipse.collections.api.RichIterable
+import org.eclipse.collections.api.list.ListIterable
+import org.eclipse.collections.api.map.MapIterable
+import org.eclipse.collections.api.set.SetIterable
 import org.eclipse.collections.impl.factory.Lists
 import org.eclipse.collections.impl.factory.Maps
 import org.eclipse.collections.impl.factory.Sets
 import org.eclipse.collections.impl.list.mutable.CompositeFastList
+import org.eclipse.collections.impl.map.mutable.UnifiedMap
+import org.eclipse.collections.impl.tuple.Tuples
 import org.eclipse.collections.impl.utility.ArrayIterate
 import org.eclipse.collections.impl.utility.LazyIterate
 import org.elasticsearch.cluster.ClusterInfo
@@ -27,19 +33,20 @@ class ShardSizeCalculator(settings: Settings, metadata: MetaData, private val cl
     private val defaultGroup = IndexGroup()
     private val allGroup = IndexGroup()
     private val youngIndexes = Sets.mutable.empty<String>()
+    val indexPatternGroupMap = Maps.mutable.empty<Pattern, IndexGroup>()
 
     init {
         val indexPatterns = settings.get("tempest.balancer.groupingPatterns", "").split(",").map { safeCompile(it) }.filterNotNull()
         val modelAgeInMinutes = settings.getAsInt("tempest.balancer.modelAgeMinutes", 60*12)
-        val modelTimestampThreshold = DateTime().millis - modelAgeInMinutes * 60 * 1000
-        val indexPatternGroupMap = Maps.mutable.empty<Pattern, IndexGroup>()
+        val modelTimestampThreshold = DateTime().minusMinutes(modelAgeInMinutes)
+
 
         for (indexMetadata in metadata) {
             val matchedPattern = indexPatterns.firstOrNull { it.matcher(indexMetadata.index).matches() }
             val indexGroup = if (matchedPattern == null) defaultGroup else indexPatternGroupMap.getIfAbsentPut(matchedPattern, { IndexGroup() })
             indexNameGroupMap.put(indexMetadata.index, indexGroup)
 
-            if (indexMetadata.creationDate < modelTimestampThreshold) {
+            if (modelTimestampThreshold.isAfter(indexMetadata.creationDate)) {
                 indexGroup.addModel(indexMetadata)
                 allGroup.addModel(indexMetadata)
             }
@@ -93,6 +100,14 @@ class ShardSizeCalculator(settings: Settings, metadata: MetaData, private val cl
     }
 
     private fun findPrimaryShardById(it: IndexMetaData, id: Int) = routingTable.index(it.index).shard(id).primaryShard()
+
+    fun patternMapping() : MapIterable<String, RichIterable<String>> = indexPatternGroupMap
+            .keyValuesView()
+            .collect { Tuples.pair(it.one.toString(), it.two.allIndexes().collect { it.index }) }
+            .toMap({it.one}, {it.two as RichIterable<String>}) // cast needed for generics bug
+            .apply { put("*", defaultGroup.allIndexes().collect {it.index }) }
+
+    fun youngIndexes() : SetIterable<String> = youngIndexes
 }
 
 class IndexGroup() {
@@ -112,12 +127,17 @@ class IndexGroup() {
     }
 
     fun isHomogeneous(): Boolean {
-        val allIndexes = CompositeFastList<IndexMetaData>()
-        allIndexes.addComposited(modelIndexes)
-        allIndexes.addComposited(youngIndexes)
+        val allIndexes = allIndexes()
 
         if (allIndexes.isEmpty) { return false; }
         val value = allIndexes.first.totalNumberOfShards
         return allIndexes.all { it.totalNumberOfShards == value }
+    }
+
+    fun allIndexes(): CompositeFastList<IndexMetaData> {
+        val allIndexes = CompositeFastList<IndexMetaData>()
+        allIndexes.addComposited(modelIndexes)
+        allIndexes.addComposited(youngIndexes)
+        return allIndexes
     }
 }

@@ -50,6 +50,7 @@ class HeuristicBalancer(    settings: Settings,
     private var roundRobinAllocatorIndex: Int = 0
 
     fun rebalance(): Boolean {
+        updateBalancerState()
         if (!rebalancePreconditionsCheck()) { return false }
 
         val bestMoveChain = findBestNextMoveChain(baseModelCluster)
@@ -57,7 +58,7 @@ class HeuristicBalancer(    settings: Settings,
 
         if (nextMoveBatch.moves.isEmpty()) {
             balancerState.lastStableStructuralHash = baseModelCluster.calculateStructuralHash()
-            balancerState.lastFailedRebalanceTimestamp = DateTime.now()
+            balancerState.lastOptimalBalanceFoundDateTime = DateTime.now()
             return false
         }
 
@@ -66,6 +67,12 @@ class HeuristicBalancer(    settings: Settings,
         }
 
         return true
+    }
+
+    private fun updateBalancerState() {
+        balancerState.clusterScore = initalClusterScore
+        balancerState.clusterRisk = baseModelCluster.calculateRisk()
+        balancerState.clusterBalanceRatio = baseModelCluster.calculateBalanceRatio()
     }
 
     fun findBestNextMoveChain(modelCluster: ModelCluster) : MoveChain {
@@ -170,7 +177,7 @@ class HeuristicBalancer(    settings: Settings,
             return false;
         }
 
-        if (DateTime.now().minusMinutes(forceRebalanceThresholdMinutes).isAfter(balancerState.lastFailedRebalanceTimestamp) ) {
+        if (DateTime.now().minusMinutes(forceRebalanceThresholdMinutes).isAfter(balancerState.lastOptimalBalanceFoundDateTime) ) {
             logger.trace("forcing rebalance due to time threshold expiration")
             return true;
         }
@@ -241,7 +248,6 @@ class HeuristicBalancer(    settings: Settings,
             return true
         }
 
-        logger.warn("failed to find node for unallocated shard: {}", shard)
         return false
     }
 }

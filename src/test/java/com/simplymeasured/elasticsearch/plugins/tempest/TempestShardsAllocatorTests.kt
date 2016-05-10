@@ -52,16 +52,16 @@ class TempestShardsAllocatorTests : ESAllocationTestCase() {
                 .put("cluster.routing.allocation.cluster_concurrent_rebalance", 8)
                 .build()
 
+        val balancerState = BalancerState()
         val shardSizes = Maps.mutable.empty<String, Long>()
         val testClusterInfo = ClusterInfo(Maps.mutable.empty(), Maps.mutable.empty(), shardSizes, Maps.mutable.empty())
         val mockClusterInfoService = mock(ClusterInfoService::class.java)
         Mockito.`when`(mockClusterInfoService.clusterInfo).thenReturn(testClusterInfo)
 
-
         val strategy = MockAllocationService(
                 settings,
                 randomAllocationDeciders(settings, NodeSettingsService(Settings.Builder.EMPTY_SETTINGS), getRandom()),
-                ShardsAllocators(settings, NoopGatewayAllocator.INSTANCE, TempestShardsAllocator(settings, mockClusterInfoService)),
+                ShardsAllocators(settings, NoopGatewayAllocator.INSTANCE, TempestShardsAllocator(settings, mockClusterInfoService, balancerState)),
                 EmptyClusterInfoService.INSTANCE)
 
         var (routingTable, clusterState) = createCluster(strategy)

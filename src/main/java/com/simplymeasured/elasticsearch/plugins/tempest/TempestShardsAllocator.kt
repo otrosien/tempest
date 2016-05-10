@@ -14,6 +14,7 @@ import org.elasticsearch.cluster.routing.allocation.decider.FilterAllocationDeci
 import org.elasticsearch.common.component.AbstractComponent
 import org.elasticsearch.common.inject.Inject
 import org.elasticsearch.common.settings.Settings
+import org.joda.time.DateTime
 import java.util.*
 
 /**
@@ -21,13 +22,16 @@ import java.util.*
  */
 
 class TempestShardsAllocator
-    @Inject constructor(settings: Settings, val clusterInfoService: ClusterInfoService) :
+    @Inject constructor(    settings: Settings,
+                        val clusterInfoService: ClusterInfoService,
+                        val balancerState: BalancerState) :
         AbstractComponent(settings), ShardsAllocator {
 
-    val balancerState = BalancerState()
-
     override fun rebalance(allocation: RoutingAllocation): Boolean {
-        val shardSizeCalculator = ShardSizeCalculator(settings, allocation.metaData(), clusterInfoService.clusterInfo, allocation.routingTable())
+        val shardSizeCalculator = buildShardSizeCalculator(allocation)
+
+        balancerState.lastRebalanceAttemptDateTime = DateTime.now()
+
         return HeuristicBalancer(
                 settings,
                 allocation,
@@ -36,8 +40,15 @@ class TempestShardsAllocator
                 Random()).rebalance();
     }
 
-    override fun allocateUnassigned(allocation: RoutingAllocation): Boolean {
+    private fun buildShardSizeCalculator(allocation: RoutingAllocation): ShardSizeCalculator {
         val shardSizeCalculator = ShardSizeCalculator(settings, allocation.metaData(), clusterInfoService.clusterInfo, allocation.routingTable())
+        balancerState.youngIndexes = shardSizeCalculator.youngIndexes()
+        balancerState.patternMapping = shardSizeCalculator.patternMapping()
+        return shardSizeCalculator
+    }
+
+    override fun allocateUnassigned(allocation: RoutingAllocation): Boolean {
+        val shardSizeCalculator = buildShardSizeCalculator(allocation)
         if (allocation.routingNodes().hasUnassignedShards()) {
             return HeuristicBalancer(
                     settings,
@@ -55,7 +66,7 @@ class TempestShardsAllocator
     }
 
     override fun moveShards(allocation: RoutingAllocation): Boolean {
-        val shardSizeCalculator = ShardSizeCalculator(settings, allocation.metaData(), clusterInfoService.clusterInfo, allocation.routingTable())
+        val shardSizeCalculator = buildShardSizeCalculator(allocation)
         return HeuristicBalancer(
                 settings,
                 allocation,
