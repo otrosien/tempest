@@ -44,10 +44,16 @@ class HeuristicBalancer(    settings: Settings,
     private val minimumShardMovementOverhead: Long = settings.getAsLong("tempest.balancer.minimumShardMovementOverhead", 100000000)
     private val maximumAllowedRiskRate: Double = settings.getAsDouble("tempest.balancer.maximumAllowedRiskRate", 1.10)
     private val forceRebalanceThresholdMinutes: Int = settings.getAsInt("tempest.balancer.forceRebalanceThresholdMinutes", 60)
+    private val minimumNodeSizeChangeRate: Double = settings.getAsDouble("tempest.balancer.minimumNodeSizeChangeRate", 0.10)
     private val initalClusterScore: Double = baseModelCluster.calculateBalanceScore()
     private val maximumAllowedRisk: Double = baseModelCluster.calculateRisk() * maximumAllowedRiskRate * maximumAllowedRiskRate
+    private val noopMoveChain : MoveChain = MoveChain.Companion.buildOptimalMoveChain(Lists.mutable.of(MoveActionBatch(emptyList<MoveAction>(), 0, 0.0, initalClusterScore)))
 
     private var roundRobinAllocatorIndex: Int = 0
+
+    init {
+        if (logger.isTraceEnabled) {logger.trace(baseModelCluster.toString())}
+    }
 
     fun rebalance(): Boolean {
         updateBalancerState()
@@ -57,14 +63,22 @@ class HeuristicBalancer(    settings: Settings,
         val nextMoveBatch = bestMoveChain.moveBatches.first()
 
         if (nextMoveBatch.moves.isEmpty()) {
+            logger.debug("balanced complete - score: {} ratio: {}", initalClusterScore, baseModelCluster.calculateBalanceRatio())
             balancerState.lastStableStructuralHash = baseModelCluster.calculateStructuralHash()
             balancerState.lastOptimalBalanceFoundDateTime = DateTime.now()
             return false
         }
 
         for (move in nextMoveBatch.moves) {
+            logger.debug("applying move of {} from {} to {}",
+                    move.shard.backingShard.shardId(),
+                    move.sourceNode.backingNode.node().hostName,
+                    move.destNode.backingNode.node().hostName)
+
             routingNodes.relocate(move.shard.backingShard, move.destNode.nodeId, move.shard.backingShard.expectedShardSize)
         }
+
+        balancerState.lastBalanceChangeDateTime = DateTime.now()
 
         return true
     }
@@ -79,7 +93,7 @@ class HeuristicBalancer(    settings: Settings,
         val goodMoveChains = findGoodMoveChains(modelCluster)
 
         if (goodMoveChains.isEmpty()) {
-            return MoveChain.buildOptimalMoveChain(Lists.mutable.of(MoveActionBatch(emptyList<MoveAction>(), 0, 0.0, initalClusterScore)))
+            return noopMoveChain
         }
 
         var bestScore = Double.MAX_VALUE
@@ -93,7 +107,7 @@ class HeuristicBalancer(    settings: Settings,
         }
 
         val orderedChains = goodMoveChains.sortedBy { it.overhead / bestOverhead.toDouble() + it.risk / bestRisk + it.score / bestScore }
-        return orderedChains.first { isValidBatch(it.moveBatches.first()) }
+        return orderedChains.firstOrNull { isValidBatch(it.moveBatches.first()) } ?: noopMoveChain
     }
 
     private fun isValidBatch(moveBatch: MoveActionBatch): Boolean {
@@ -124,8 +138,10 @@ class HeuristicBalancer(    settings: Settings,
             searchCounter.increment()
         }
 
-        return bestNQueue.asList().filter { it.risk <= maximumAllowedRisk }
+        return bestNQueue.asList().filter { calculateBestNodeUsageImprovementFromBase(it) >= minimumNodeSizeChangeRate }
     }
+
+    private fun calculateBestNodeUsageImprovementFromBase(it: MoveChain) = baseModelCluster.findBestNodeUsageImprovement(ModelCluster(baseModelCluster).apply { applyMoveChain(it) })
 
     fun createRandomMoveChain(modelCluster: ModelCluster, maxBatchSize: Int, searchDepth: Int): MoveChain {
         val moveBatches : MutableList<MoveActionBatch> = Lists.mutable.empty()
@@ -158,32 +174,40 @@ class HeuristicBalancer(    settings: Settings,
 
     fun rebalancePreconditionsCheck() : Boolean {
         if (routingNodes.count() < 2) {
-            logger.trace("not enough nodes to balance")
+            logger.debug("not enough nodes to balance")
             return false
         }
 
         if (routingNodes.shards { !it.started() }.count() > 0) {
-            logger.trace("found non-started or relocating shards, waiting for cluster to stabilize")
+            logger.debug("found non-started or relocating shards, waiting for cluster to stabilize")
             return false
         }
 
         if (routingNodes.shardsWithState(ShardRoutingState.STARTED).isEmpty()) {
-            logger.trace("could not find any started shards to balance")
+            logger.debug("could not find any started shards to balance")
             return false
         }
 
         if (concurrentRebalanceSetting == 0) {
-            logger.trace("rebalance disabled")
+            logger.debug("rebalance disabled")
             return false;
         }
 
-        if (DateTime.now().minusMinutes(forceRebalanceThresholdMinutes).isAfter(balancerState.lastOptimalBalanceFoundDateTime) ) {
-            logger.trace("forcing rebalance due to time threshold expiration")
+        if (initalClusterScore == 0.0) {
+            // this condition can occur during restarts where the cluster services are not
+            // fully started yet and thus report "0" size for shards
+            logger.debug("cluster score is 0")
+            return false
+        }
+
+        if (DateTime.now().minusMinutes(forceRebalanceThresholdMinutes).isAfter(balancerState.lastOptimalBalanceFoundDateTime) &&
+            DateTime.now().minusMinutes(forceRebalanceThresholdMinutes).isAfter(balancerState.lastBalanceChangeDateTime)) {
+            logger.debug("forcing rebalance due to time threshold expiration")
             return true;
         }
 
         if (baseModelCluster.calculateStructuralHash() == balancerState.lastStableStructuralHash ) {
-            logger.trace("cluster appears to already be balanced")
+            logger.debug("cluster appears to already be balanced")
             return false;
         }
 

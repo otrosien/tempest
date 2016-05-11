@@ -1,6 +1,9 @@
 package com.simplymeasured.elasticsearch.plugins.tempest.balancer
 
+import org.eclipse.collections.api.tuple.Pair
 import org.eclipse.collections.impl.factory.Sets
+import org.eclipse.collections.impl.tuple.Tuples
+import org.eclipse.collections.impl.utility.LazyIterate
 import org.elasticsearch.cluster.ClusterInfo
 import org.elasticsearch.cluster.routing.RoutingNode
 import org.elasticsearch.cluster.routing.RoutingNodes
@@ -43,6 +46,23 @@ class ModelCluster private constructor(val modelNodes: List<ModelNode>, val mock
         throw NoLegalMoveFound()
     }
 
+    fun applyMoveChain(moveChain: MoveChain) {
+        moveChain.moveBatches.forEach { applyMoveActionBatch(it) }
+    }
+
+    fun applyMoveActionBatch(moveActionBatch: MoveActionBatch) {
+        moveActionBatch.moves.forEach { applyMoveAction(it) }
+    }
+
+    fun applyMoveAction(moveAction: MoveAction) {
+        val localSourceNode = modelNodes.find { it.nodeId == moveAction.sourceNode.nodeId }!!
+        val localDestNode = modelNodes.find { it.nodeId == moveAction.destNode.nodeId }!!
+        val localShard = localSourceNode.shards.find { it.backingShard.isSameShard(moveAction.shard.backingShard) }!!
+
+        localSourceNode.shards.remove(localShard)
+        localDestNode.shards.add(localShard)
+    }
+
     fun stabilizeCluster() {
         modelNodes.forEach { it.stabilizeNode() }
     }
@@ -52,7 +72,7 @@ class ModelCluster private constructor(val modelNodes: List<ModelNode>, val mock
     fun calculateRisk(): Double = modelNodes.map { it.calculateNodeScore(expectedUnitCapacity) }.max() ?: 0.0
 
     fun calculateBalanceRatio() : Double = modelNodes
-            .map { it.calculateUsage()/it.allocationScale }
+            .map { it.calculateNormalizedNodeUsage() }
             .filter { it > 0.0 }
             .let { (it.max() ?: Double.MAX_VALUE)  / (it.min() ?: Double.MAX_VALUE) }
 
@@ -63,11 +83,28 @@ class ModelCluster private constructor(val modelNodes: List<ModelNode>, val mock
         return totalNodeSize / totalClusterCapacity
     }
 
-    fun calculateStructuralHash(): Int = modelNodes.flatMap { it.shards }
-                                                   .map { "${it.backingShard.currentNodeId()}-${it.backingShard.index}-${it.backingShard.id}" }
-                                                   .toList()
-                                                   .sorted()
-                                                   .hashCode()
+    fun findBestNodeUsageImprovement(otherCluster: ModelCluster): Double = LazyIterate
+            .zip(modelNodes, otherCluster.modelNodes)
+            .collect { Tuples.pair(it.one.calculateNormalizedNodeUsage(), it.two.calculateNormalizedNodeUsage()) }
+            .collect { Math.abs(1.0 - safeRateDivide(it.two, it.one)) }
+            .max()
+
+    private fun safeRateDivide(top: Double, bottom: Double) : Double {
+        if (top == 0.0 && bottom == 0.0) { return 1.0 }
+        if (bottom == 0.0) { return Double.MAX_VALUE; }
+        return top/bottom
+    }
+
+    fun calculateStructuralHash(): Int =  modelNodes.map { it.calculateStructuralHash() }.toHashSet().hashCode()
+
+    override fun toString(): String {
+        return modelNodes
+                .flatMap { it.shards }
+                .map { "${it.backingShard.currentNodeId()} ${it.backingShard.index} ${it.backingShard.id} ${it.state} (${it.estimatedSize}/${it.size})" }
+                .toList()
+                .sorted()
+                .joinToString("\n")
+    }
 }
 
 class ModelNode(val backingNode: RoutingNode, val nodeId: String, val shards: MutableList<ModelShard>, val allocationScale: Double) {
@@ -88,6 +125,8 @@ class ModelNode(val backingNode: RoutingNode, val nodeId: String, val shards: Mu
 
     fun calculateUsage() : Long = shards.map { it.estimatedSize }.sum()
 
+    fun calculateNormalizedNodeUsage() : Double = calculateUsage()/allocationScale
+
     fun stabilizeNode() {
         val shardIterator = shards.iterator()
         while (shardIterator.hasNext()) {
@@ -99,6 +138,8 @@ class ModelNode(val backingNode: RoutingNode, val nodeId: String, val shards: Mu
             }
         }
     }
+
+    fun calculateStructuralHash(): Int = shards.map { (it.index + it.id).hashCode() }.toHashSet().apply { add(nodeId.hashCode()) }.hashCode()
 }
 
 data class ModelShard(val index: String, val id: Int, var state: ShardRoutingState, val primary: Boolean, val size: Long, val estimatedSize: Long, val backingShard: ShardRouting) {

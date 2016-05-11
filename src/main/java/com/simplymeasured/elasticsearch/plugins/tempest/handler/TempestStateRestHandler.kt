@@ -32,8 +32,9 @@ class TempestStateRestHandler
         val jsonBuilder = XContentFactory.jsonBuilder()
 
         jsonBuilder.startObject()
-        jsonBuilder.field("lastOptimalBalanceFound", balancerState.lastOptimalBalanceFoundDateTime)
-        jsonBuilder.field("lastRebalanceAttempt", balancerState.lastRebalanceAttemptDateTime)
+        jsonBuilder.field("lastOptimalBalanceFoundDateTime", balancerState.lastOptimalBalanceFoundDateTime)
+        jsonBuilder.field("lastBalanceChangeDateTime", balancerState.lastBalanceChangeDateTime)
+        jsonBuilder.field("lastRebalanceAttemptDateTime", balancerState.lastRebalanceAttemptDateTime)
         jsonBuilder.startArray("youngIndexes")
         balancerState.youngIndexes.forEach { jsonBuilder.value(it) }
         jsonBuilder.endArray()

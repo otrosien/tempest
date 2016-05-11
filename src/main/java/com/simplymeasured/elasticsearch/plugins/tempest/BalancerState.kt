@@ -9,6 +9,7 @@ import org.joda.time.DateTime
 
 class BalancerState() {
     var lastOptimalBalanceFoundDateTime: DateTime = DateTime(0)
+    var lastBalanceChangeDateTime: DateTime = DateTime(0)
     var lastRebalanceAttemptDateTime: DateTime = DateTime(0)
     var lastStableStructuralHash: Int = 0
     var youngIndexes: SetIterable<String> = Sets.mutable.empty<String>()
