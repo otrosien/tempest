@@ -76,27 +76,25 @@ class ShardSizeCalculator(settings: Settings, metadata: MetaData, private val cl
     }
 
     private fun calculateEstimatedShardSize(shardRouting: ShardRouting): Long {
-        if (!youngIndexes.contains(shardRouting.index())) { return actualShardSize(shardRouting); }
+        if (!youngIndexes.contains(shardRouting.index())) { return actualShardSize(shardRouting) }
 
-        val indexGroup = indexNameGroupMap.getIfAbsent(shardRouting.index, { if (defaultGroup.hasModelIndexes()) defaultGroup else allGroup })
-        if (indexGroup.hasModelIndexes()) {
-            if (indexGroup.isHomogeneous()) {
-                return indexGroup.modelIndexes
-                        .map { findPrimaryShardById(it, shardRouting.id) }
-                        .map { clusterInfo.getShardSize(it, 0) }
-                        .average()
-                        .toLong()
-            }
+        val indexGroup = indexNameGroupMap.get(shardRouting.index)
+        if (indexGroup == null || !indexGroup.hasModelIndexes()) { return actualShardSize(shardRouting) }
 
+        if (indexGroup.isHomogeneous()) {
             return indexGroup.modelIndexes
-                    .flatMap { routingTable.index(it.index).shards.values() }
-                    .map { it.value.primaryShard() }
+                    .map { findPrimaryShardById(it, shardRouting.id) }
                     .map { clusterInfo.getShardSize(it, 0) }
                     .average()
                     .toLong()
         }
 
-        return 0
+        return indexGroup.modelIndexes
+                .flatMap { routingTable.index(it.index).shards.values() }
+                .map { it.value.primaryShard() }
+                .map { clusterInfo.getShardSize(it, 0) }
+                .average()
+                .toLong()
     }
 
     private fun findPrimaryShardById(it: IndexMetaData, id: Int) = routingTable.index(it.index).shard(id).primaryShard()
