@@ -8,6 +8,13 @@
     <artifactId>tempest</artifactId>
     <version>2.0.0-ES${elasticsearch.version}-SNAPSHOT</version>
 
+    <licenses>
+        <license>
+            <name>The MIT License (MIT)</name>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
     <properties>
         <kotlin.version>1.0.1-2</kotlin.version>
         <elasticsearch.version>2.3.2</elasticsearch.version>
