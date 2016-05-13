@@ -8,7 +8,9 @@ import org.elasticsearch.cluster.routing.allocation.decider.FilterAllocationDeci
 import org.elasticsearch.common.settings.Settings
 
 /**
- * Created by awhite on 5/8/16.
+ * Partial implementation of org.elasticsearch.cluster.routing.allocation.decider.FilterAllocationDecider
+ *
+ * Note: Index awareness is not not implemented. Node awareness should be fully supported.
  */
 class MockFilterAllocationDecider(settings: Settings) : MockDecider {
     private val clusterRequireFilters: DiscoveryNodeFilters?

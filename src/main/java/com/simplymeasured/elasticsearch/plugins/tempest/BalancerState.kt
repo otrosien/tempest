@@ -7,7 +7,12 @@ import org.eclipse.collections.impl.factory.Maps
 import org.eclipse.collections.impl.factory.Sets
 import org.joda.time.DateTime
 
+/**
+ * A shared state used by the allocator, balancer, and rest endpoint for book keeping and reporting
+ */
 class BalancerState() {
+    // ideally this should be a data class I think but Kotlin is requiring constructor parameters for that and the
+    // default no-arg constructor just makes more sense here.
     var lastOptimalBalanceFoundDateTime: DateTime = DateTime(0)
     var lastBalanceChangeDateTime: DateTime = DateTime(0)
     var lastRebalanceAttemptDateTime: DateTime = DateTime(0)

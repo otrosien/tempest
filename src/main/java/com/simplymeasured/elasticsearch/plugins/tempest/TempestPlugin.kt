@@ -6,7 +6,7 @@ import org.elasticsearch.common.inject.Module
 import org.elasticsearch.plugins.Plugin
 
 /**
- * Created by awhite on 4/14/16.
+ * Main configuration entry point for the Tempest Plugin Required for ES Integration
  */
 
 class TempestPlugin : Plugin() {

@@ -18,7 +18,7 @@ import org.joda.time.DateTime
 import java.util.*
 
 /**
- * Created by awhite on 4/15/16.
+ * Tempest Shards Allocator that delegates to a Heuristic Balancer
  */
 
 class TempestShardsAllocator
@@ -38,13 +38,6 @@ class TempestShardsAllocator
                 shardSizeCalculator,
                 balancerState,
                 Random()).rebalance();
-    }
-
-    private fun buildShardSizeCalculator(allocation: RoutingAllocation): ShardSizeCalculator {
-        val shardSizeCalculator = ShardSizeCalculator(settings, allocation.metaData(), clusterInfoService.clusterInfo, allocation.routingTable())
-        balancerState.youngIndexes = shardSizeCalculator.youngIndexes()
-        balancerState.patternMapping = shardSizeCalculator.patternMapping()
-        return shardSizeCalculator
     }
 
     override fun allocateUnassigned(allocation: RoutingAllocation): Boolean {
@@ -77,6 +70,13 @@ class TempestShardsAllocator
 
     override fun applyStartedShards(allocation: StartedRerouteAllocation) {
         /* ONLY FOR GATEWAYS */
+    }
+
+    private fun buildShardSizeCalculator(allocation: RoutingAllocation): ShardSizeCalculator {
+        val shardSizeCalculator = ShardSizeCalculator(settings, allocation.metaData(), clusterInfoService.clusterInfo, allocation.routingTable())
+        balancerState.youngIndexes = shardSizeCalculator.youngIndexes()
+        balancerState.patternMapping = shardSizeCalculator.patternMapping()
+        return shardSizeCalculator
     }
 
 }

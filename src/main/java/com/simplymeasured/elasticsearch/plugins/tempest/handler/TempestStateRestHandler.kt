@@ -14,7 +14,7 @@ import org.elasticsearch.rest.*
 import org.joda.time.DateTime
 
 /**
- * Created by awhite on 4/14/16.
+ * Simple reporting REST handler that exposes balancer's stats on /_tempest
  */
 class TempestStateRestHandler
     @Inject constructor(val setttings: Settings,

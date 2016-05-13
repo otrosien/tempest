@@ -27,6 +27,11 @@ import org.joda.time.DateTime
 import java.util.*
 import kotlin.jvm.internal.iterator
 
+/**
+ * Main shard balancer
+ *
+ * For details on the algorithm and usage see the project's README
+ */
 class HeuristicBalancer(    settings: Settings,
                         val allocation: RoutingAllocation,
                         val shardSizeCalculator: ShardSizeCalculator,
@@ -55,6 +60,9 @@ class HeuristicBalancer(    settings: Settings,
         if (logger.isTraceEnabled) {logger.trace(baseModelCluster.toString())}
     }
 
+    /**
+     * rebalance the cluster using a heuristic random sampling approach
+     */
     fun rebalance(): Boolean {
         updateBalancerState()
         if (!rebalancePreconditionsCheck()) { return false }
@@ -89,7 +97,7 @@ class HeuristicBalancer(    settings: Settings,
         balancerState.clusterBalanceRatio = baseModelCluster.calculateBalanceRatio()
     }
 
-    fun findBestNextMoveChain(modelCluster: ModelCluster) : MoveChain {
+    private fun findBestNextMoveChain(modelCluster: ModelCluster) : MoveChain {
         val goodMoveChains = findGoodMoveChains(modelCluster)
 
         if (goodMoveChains.isEmpty()) {
@@ -143,7 +151,7 @@ class HeuristicBalancer(    settings: Settings,
 
     private fun calculateBestNodeUsageImprovementFromBase(it: MoveChain) = baseModelCluster.findBestNodeUsageImprovement(ModelCluster(baseModelCluster).apply { applyMoveChain(it) })
 
-    fun createRandomMoveChain(modelCluster: ModelCluster, maxBatchSize: Int, searchDepth: Int): MoveChain {
+    private fun createRandomMoveChain(modelCluster: ModelCluster, maxBatchSize: Int, searchDepth: Int): MoveChain {
         val moveBatches : MutableList<MoveActionBatch> = Lists.mutable.empty()
 
         for (depth in 1..searchDepth) {
@@ -156,7 +164,7 @@ class HeuristicBalancer(    settings: Settings,
         return MoveChain.buildOptimalMoveChain(moveBatches)
     }
 
-    fun createRandomMoveBatch(modelCluster: ModelCluster, size: Int) : MoveActionBatch {
+    private fun createRandomMoveBatch(modelCluster: ModelCluster, size: Int) : MoveActionBatch {
         val moves: MutableList<MoveAction> = Lists.mutable.empty()
 
         for (moveNumber in 1..size) {
@@ -172,7 +180,7 @@ class HeuristicBalancer(    settings: Settings,
         return MoveActionBatch(moves, overhead, risk, score)
     }
 
-    fun rebalancePreconditionsCheck() : Boolean {
+    private fun rebalancePreconditionsCheck() : Boolean {
         if (routingNodes.count() < 2) {
             logger.debug("not enough nodes to balance")
             return false
@@ -214,6 +222,12 @@ class HeuristicBalancer(    settings: Settings,
         return true
     }
 
+    /**
+     * Attempt to allocate unallocated shards using a round-robin scheme
+     *
+     * Note: This does not leverage random sampling like the rebalance method. Instead, the goal is to get the shards
+     *       allocated quickly and then let the rebalancer logic move any small shards around.
+     */
     fun allocateUnassigned(): Boolean {
         if (!routingNodes.hasUnassignedShards() || routingNodes.count() <= 1) { return false }
 
@@ -233,6 +247,12 @@ class HeuristicBalancer(    settings: Settings,
         return changed
     }
 
+    /**
+     * Attempt to move shards that can no longer be allocated to a node using a round-robin scheme
+     *
+     * Note: This does not leverage random sampling like the rebalance method. Instead, the goal is to get the shards
+     *       allocated quickly and then let the rebalancer logic move any small shards around.
+     */
     fun moveShards(): Boolean {
         val shardsThatMustMove = Lists.mutable.ofAll(routingNodes.shards { shouldMove(it) }).shuffleThis(random)
         val routingNodesList = routingNodes.toList()
