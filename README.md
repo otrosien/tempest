@@ -21,11 +21,27 @@ The following are some of the high level features that Tempest offers (see below
 
 ## Install
 
-TBD
+Current supported versions:
+
+* 2.3.2
+
+How to obtain deliverable is TBD.
+
+## How it Works
+
+Tempest uses a pseudo Monte-Carlo search algorithm coupled with a normalizing score function to find a series of moves
+that should put the cluster in a more balanced state while minimizing risk and minimizing network overheard. The basic
+process looks something like this:
+
+1. Create an internal model of the current cluster state
+2. Randomly generate several chains of moves (grouped in batches of size `cluster_concurrent_rebalance`)
+3. Find the top N best chains that produce the best cluster state
+4. Of the top N chains, select the one that minimizes risk and network overhead
+5. Apply the first batch of the best chain
 
 ## Configuration
 
-All setting are dynamic are are reloaded for each rebalance request. The defaults should be reasonable for clusters of
+All setting are dynamic and are reloaded for each rebalance request. The defaults should be reasonable for clusters of
 size 3 to 50 nodes.
 
 ### Searching
@@ -42,9 +58,7 @@ search depth in favor of of a higher search scale factor.
 
 ### Limiting
 
-These settings are used to prevent Tempest from being too aggressive with balancing. In particular, they should help prevent
-odd intermediate states that put strain on a single node and prevent costly rebalances that minimum impact on the overall
-balance.
+These settings are used to prevent Tempest from being too aggressive or taking unnecessary risks when balancing.
 
 * `tempest.balancer.maximumAllowedRiskRate` - Maximum allowed percent increase of the largest node during a chain (default 1.10)
 * `tempest.balancer.forceRebalanceThresholdMinutes` - Maximum allowed time before a rebalance is forced (default 60); Note, does not actually schedule rebalances
