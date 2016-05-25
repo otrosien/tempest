@@ -167,8 +167,8 @@ class IndexGroup() {
         val allIndexes = allIndexes()
 
         if (allIndexes.isEmpty) { return false; }
-        val value = allIndexes.first.totalNumberOfShards
-        return allIndexes.all { it.totalNumberOfShards == value }
+        val value = allIndexes.first.numberOfShards
+        return allIndexes.all { it.numberOfShards == value }
     }
 
     fun allIndexes(): CompositeFastList<IndexMetaData> {
