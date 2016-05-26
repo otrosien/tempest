@@ -80,8 +80,6 @@ class HeuristicBalancer(    settings: Settings,
     private val maximumAllowedRisk: Double = baseModelCluster.calculateRisk() * maximumAllowedRiskRate * maximumAllowedRiskRate
     private val noopMoveChain : MoveChain = MoveChain.Companion.buildOptimalMoveChain(Lists.mutable.of(MoveActionBatch(emptyList<MoveAction>(), 0, 0.0, initalClusterScore)))
 
-    private var roundRobinAllocatorIndex: Int = 0
-
     init {
         if (logger.isTraceEnabled) {logger.trace(baseModelCluster.toString())}
     }
@@ -285,22 +283,19 @@ class HeuristicBalancer(    settings: Settings,
      *       allocated quickly and then let the rebalancer logic move any small shards around.
      */
     fun moveShards(): Boolean {
-        val shardsThatMustMove = Lists.mutable.ofAll(routingNodes.shards { shouldMove(it!!) }).shuffleThis(random)
-        val routingNodesList = routingNodes.toList()
+        val shardsThatMustMove = Lists.mutable.ofAll(routingNodes.shards { shouldMove(it!!) })
+                                              .sortThisByLong { shardSizeCalculator.estimateShardSize(it) }
+                                              .reverseThis()
+        val modelCluster = ModelCluster(baseModelCluster)
         var changed = false
 
-        for (shard in shardsThatMustMove) {
-            val shardSize = allocation.clusterInfo().getShardSize(shard, ShardRouting.UNAVAILABLE_EXPECTED_SHARD_SIZE)
+        for (shardThatMustMove in shardsThatMustMove) {
+            val bestModelNodes = modelCluster.findBestNodesForShard(shardThatMustMove)
+            val allocatedNode = tryMove(shardThatMustMove, bestModelNodes)
 
-            for (attempt in 1..routingNodesList.size) {
-                val node = routingNodesList.get(roundRobinAllocatorIndex++ % routingNodesList.size)
-
-                if (deciders.canRebalance(shard, allocation).type() == Decision.Type.YES &&
-                    deciders.canAllocate(shard, node, allocation).type() == Decision.Type.YES) {
-
-                    routingNodes.initialize(shard, node.nodeId(), shardSize)
-                    changed = true
-                }
+            if (allocatedNode != null) {
+                modelCluster.applyShardInitialization(shardThatMustMove, allocatedNode)
+                changed = true
             }
         }
 
@@ -309,21 +304,18 @@ class HeuristicBalancer(    settings: Settings,
 
     private fun shouldMove(shard: ShardRouting) = deciders.canRemain(shard, routingNodes.node(shard.currentNodeId()), allocation).type() == Decision.Type.NO
 
-    private fun tryAllocation(shard: ShardRouting): Boolean {
-        val routingNodesList = routingNodes.toList()
-        val shardSize = allocation.clusterInfo().getShardSize(shard, ShardRouting.UNAVAILABLE_EXPECTED_SHARD_SIZE)
+    private fun tryMove(shard: ShardRouting, nodes: ListIterable<ModelNode>) : ModelNode? {
+        val shardSize = shardSizeCalculator.estimateShardSize(shard)
 
-        for (attempt in 1..routingNodesList.size) {
-            val node = routingNodesList.get(roundRobinAllocatorIndex++ % routingNodesList.size)
-            val decision = deciders.canAllocate(shard, node, allocation)
+        for (node in nodes) {
+            if (deciders.canAllocate(shard, node.backingNode, allocation) == Decision.NO) { continue }
+            if (deciders.canRebalance(shard, allocation) == Decision.NO) { continue }
 
-            if (decision == Decision.NO) { continue }
-
-            routingNodes.initialize(shard, node.nodeId(), shardSize)
-            return true
+            routingNodes.initialize(shard, node.backingNode.nodeId(), shardSize)
+            return node
         }
 
-        return false
+        return null
     }
 
     private fun tryAllocation(shard: ShardRouting, nodes: ListIterable<ModelNode>) : ModelNode? {
