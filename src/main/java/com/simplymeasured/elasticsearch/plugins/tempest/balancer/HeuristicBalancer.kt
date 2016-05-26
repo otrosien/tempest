@@ -26,12 +26,14 @@ package com.simplymeasured.elasticsearch.plugins.tempest.balancer
 
 import com.simplymeasured.elasticsearch.plugins.tempest.BalancerState
 import com.simplymeasured.elasticsearch.plugins.tempest.balancer.MockDeciders.sameNodeDecider
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.MockDeciders.shardAlreadyMovingDecider
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.MockDeciders.shardStateDecider
 import com.simplymeasured.elasticsearch.plugins.tempest.balancer.MockDeciders.shardIdAlreadyMoving
 import org.eclipse.collections.api.block.function.Function2
 import org.eclipse.collections.api.block.function.primitive.IntObjectToIntFunction
+import org.eclipse.collections.api.list.ListIterable
 import org.eclipse.collections.impl.Counter
 import org.eclipse.collections.impl.factory.Lists
+import org.eclipse.collections.impl.factory.Sets
 import org.eclipse.collections.impl.list.mutable.ListAdapter
 import org.eclipse.collections.impl.list.mutable.ListAdapter.adapt
 import org.eclipse.collections.impl.utility.LazyIterate
@@ -64,7 +66,7 @@ class HeuristicBalancer(    settings: Settings,
 
     private val routingNodes: RoutingNodes = allocation.routingNodes()
     private val deciders: AllocationDeciders = allocation.deciders()
-    private val mockDeciders: List<MockDecider> = Lists.mutable.of(sameNodeDecider, shardAlreadyMovingDecider, shardIdAlreadyMoving, MockFilterAllocationDecider(settings))
+    private val mockDeciders: ListIterable<MockDecider> = Lists.mutable.of(sameNodeDecider, shardStateDecider, shardIdAlreadyMoving, MockFilterAllocationDecider(settings))
     private val baseModelCluster: ModelCluster = ModelCluster(routingNodes, shardSizeCalculator, mockDeciders, random)
     private val concurrentRebalanceSetting: Int = settings.getAsInt(ConcurrentRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_CLUSTER_CONCURRENT_REBALANCE, 4).let { if (it == -1) 4 else it }
     private val searchDepthSetting: Int = settings.getAsInt("tempest.balancer.searchDepth", 8)
@@ -210,7 +212,7 @@ class HeuristicBalancer(    settings: Settings,
             return false
         }
 
-        if (routingNodes.shards { !it.started() }.count() > 0) {
+        if (routingNodes.shards { it?.started()?:false == false }.count() > 0) {
             logger.debug("found non-started or relocating shards, waiting for cluster to stabilize")
             return false
         }
@@ -255,15 +257,20 @@ class HeuristicBalancer(    settings: Settings,
     fun allocateUnassigned(): Boolean {
         if (!routingNodes.hasUnassignedShards() || routingNodes.count() <= 1) { return false }
 
-        val unassignedShardsIterator = routingNodes.unassigned().iterator()
-        var changed = false
-        while (unassignedShardsIterator.hasNext()) {
-            val assigned = tryAllocation(unassignedShardsIterator.next())
+        val unassignedShards = routingNodes.unassigned()
+                                           .toList()
+                                           .sortedBy { shardSizeCalculator.estimateShardSize(it) }
+                                           .reversed()
 
-            if (!assigned) {
-                unassignedShardsIterator.removeAndIgnore()
-            }
-            else {
+        val modelCluster = ModelCluster(baseModelCluster)
+        var changed = false
+
+        for (unassignedShard in unassignedShards) {
+            val bestModelNodes = modelCluster.findBestNodesForShard(unassignedShard)
+            val allocatedNode = tryAllocation(unassignedShard, bestModelNodes)
+
+            if (allocatedNode != null) {
+                modelCluster.applyShardInitialization(unassignedShard, allocatedNode)
                 changed = true
             }
         }
@@ -278,7 +285,7 @@ class HeuristicBalancer(    settings: Settings,
      *       allocated quickly and then let the rebalancer logic move any small shards around.
      */
     fun moveShards(): Boolean {
-        val shardsThatMustMove = Lists.mutable.ofAll(routingNodes.shards { shouldMove(it) }).shuffleThis(random)
+        val shardsThatMustMove = Lists.mutable.ofAll(routingNodes.shards { shouldMove(it!!) }).shuffleThis(random)
         val routingNodesList = routingNodes.toList()
         var changed = false
 
@@ -317,6 +324,20 @@ class HeuristicBalancer(    settings: Settings,
         }
 
         return false
+    }
+
+    private fun tryAllocation(shard: ShardRouting, nodes: ListIterable<ModelNode>) : ModelNode? {
+        val shardSize = shardSizeCalculator.estimateShardSize(shard)
+
+        for (node in nodes) {
+            val decision = deciders.canAllocate(shard, node.backingNode, allocation)
+            if (decision == Decision.NO) { continue }
+
+            routingNodes.initialize(shard, node.backingNode.nodeId(), shardSize)
+            return node
+        }
+
+        return null
     }
 }
 

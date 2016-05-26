@@ -37,15 +37,23 @@ object MockDeciders {
      * Ensure a shard does not end up on the same node as one of it's replicas
      */
     val sameNodeDecider = object : MockDecider {
-        override fun canMove(shard: ModelShard, destNode: ModelNode, moves: Collection<MoveAction>): Boolean {
+        override fun canAllocate(shard: ModelShard, destNode: ModelNode): Boolean {
             return destNode.shards.none { it.index == shard.index && it.id == shard.id }
+        }
+
+        override fun canMove(shard: ModelShard, destNode: ModelNode, moves: Collection<MoveAction>): Boolean {
+            return canAllocate(shard, destNode)
         }
     }
 
     /**
-     * Ensure that a shard is in the started state
+     * Ensure that a shard is in the correct state
      */
-    val shardAlreadyMovingDecider = object : MockDecider {
+    val shardStateDecider = object : MockDecider {
+        override fun canAllocate(shard: ModelShard, destNode: ModelNode): Boolean {
+            return shard.state == ShardRoutingState.UNASSIGNED
+        }
+
         override fun canMove(shard: ModelShard, destNode: ModelNode, moves: Collection<MoveAction>): Boolean {
             return shard.state == ShardRoutingState.STARTED
         }
@@ -58,6 +66,8 @@ object MockDeciders {
      * shards with the same id caused significant performance issues
      */
     val shardIdAlreadyMoving = object : MockDecider {
+        override fun canAllocate(shard: ModelShard, destNode: ModelNode): Boolean = true
+
         override fun canMove(shard: ModelShard, destNode: ModelNode, moves: Collection<MoveAction>): Boolean {
             return moves.none { it.shard.index == shard.index && it.shard.id == shard.id }
         }

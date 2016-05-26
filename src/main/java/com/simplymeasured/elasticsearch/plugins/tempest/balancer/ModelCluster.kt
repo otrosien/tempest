@@ -24,7 +24,10 @@
 
 package com.simplymeasured.elasticsearch.plugins.tempest.balancer
 
+import org.eclipse.collections.api.list.ListIterable
 import org.eclipse.collections.api.tuple.Pair
+import org.eclipse.collections.impl.block.factory.Comparators
+import org.eclipse.collections.impl.block.factory.Functions
 import org.eclipse.collections.impl.factory.Sets
 import org.eclipse.collections.impl.tuple.Tuples
 import org.eclipse.collections.impl.utility.LazyIterate
@@ -38,28 +41,36 @@ import java.util.*
 /**
  * Represents a possible cluster future easy/cheap function for manipulation
  */
-class ModelCluster private constructor(val modelNodes: List<ModelNode>, val mockDeciders: List<MockDecider>, val random: Random) {
-    companion object {
-        val MAX_MOVE_ATTEMPTS = 1000
-    }
-
-    val expectedUnitCapacity: Double = calculateExpectedUnitCapacity()
+class ModelCluster private constructor(
+        val modelNodes: ListIterable<ModelNode>,
+        val mockDeciders: ListIterable<MockDecider>,
+        val shardSizeCalculator: ShardSizeCalculator,
+        val random: Random) {
 
     /**
      * main constructor used for creating a base model from ES provided data
      */
-    constructor(routingNodes: RoutingNodes, shardSizeCalculator: ShardSizeCalculator, mockDeciders: List<MockDecider>, random: Random) :
-        this (routingNodes.map { ModelNode(it, shardSizeCalculator) },
+    constructor(routingNodes: RoutingNodes, shardSizeCalculator: ShardSizeCalculator, mockDeciders: ListIterable<MockDecider>, random: Random) :
+        this (LazyIterate.adapt(routingNodes).collect { ModelNode(it, shardSizeCalculator) }.toList(),
               mockDeciders,
+              shardSizeCalculator,
               random)
 
     /**
      * deep copy constructor
      */
     constructor(other: ModelCluster) :
-        this(other.modelNodes.map { ModelNode(it) },
+        this(other.modelNodes.collect { ModelNode(it) },
              other.mockDeciders,
+             other.shardSizeCalculator,
              other.random)
+
+
+    companion object {
+        val MAX_MOVE_ATTEMPTS = 1000
+    }
+
+    val expectedUnitCapacity: Double = calculateExpectedUnitCapacity()
 
     /**
      * Attempt to make a random move that attempts to satisfy all mock deciders
@@ -68,10 +79,10 @@ class ModelCluster private constructor(val modelNodes: List<ModelNode>, val mock
      */
     fun makeRandomMove(previousMoves: Collection<MoveAction>): MoveAction {
         for (attempt in 0..MAX_MOVE_ATTEMPTS) {
-            val sourceNode = modelNodes.get(random.nextInt(modelNodes.size))
+            val sourceNode = modelNodes.get(random.nextInt(modelNodes.size()))
             if (sourceNode.shards.isEmpty()) { continue }
 
-            val destNode = modelNodes.get(random.nextInt(modelNodes.size))
+            val destNode = modelNodes.get(random.nextInt(modelNodes.size()))
             val shard = sourceNode.shards.get(random.nextInt(sourceNode.shards.size))
 
             if (mockDeciders.all { it.canMove(shard, destNode, previousMoves) }) {
@@ -101,6 +112,12 @@ class ModelCluster private constructor(val modelNodes: List<ModelNode>, val mock
 
         localSourceNode.shards.remove(localShard)
         localDestNode.shards.add(localShard)
+    }
+
+    fun applyShardInitialization(shard: ShardRouting, allocatedNode: ModelNode) {
+        val modelShard = ModelShard(shard, size = shardSizeCalculator.actualShardSize(shard), estimatedSize = shardSizeCalculator.estimateShardSize(shard))
+        modelShard.state = ShardRoutingState.INITIALIZING
+        allocatedNode.shards.add(modelShard)
     }
 
     /**
@@ -153,6 +170,14 @@ class ModelCluster private constructor(val modelNodes: List<ModelNode>, val mock
         if (top == 0.0 && bottom == 0.0) { return 1.0 }
         if (bottom == 0.0) { return Double.MAX_VALUE; }
         return top/bottom
+    }
+
+    fun findBestNodesForShard(unassignedShard: ShardRouting) : ListIterable<ModelNode> {
+        val modelShard = ModelShard(unassignedShard, size = shardSizeCalculator.actualShardSize(unassignedShard), estimatedSize = shardSizeCalculator.estimateShardSize(unassignedShard))
+        return modelNodes.select { node -> mockDeciders.all { decider -> decider.canAllocate(modelShard, node) } }
+                         .toSortedList(Comparators.chain(
+                                 Comparators.byFunction<ModelNode, Double> {it.calculateNormalizedNodeUsage()},
+                                 Comparators.byFunction<ModelNode, Int> {it.shards.size}))
     }
 
     /**

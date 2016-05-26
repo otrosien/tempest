@@ -38,19 +38,23 @@ import org.elasticsearch.common.settings.Settings
  */
 class MockFilterAllocationDecider(settings: Settings) : MockDecider {
     private val clusterRequireFilters: DiscoveryNodeFilters?
+
     private val clusterIncludeFilters: DiscoveryNodeFilters?
     private val clusterExcludeFilters: DiscoveryNodeFilters?
-
     init {
         clusterRequireFilters = settings.getByPrefix(CLUSTER_ROUTING_REQUIRE_GROUP).getAsMap().let { if (it.isEmpty()) null else DiscoveryNodeFilters.buildFromKeyValue(AND, it) }
         clusterIncludeFilters = settings.getByPrefix(CLUSTER_ROUTING_INCLUDE_GROUP).getAsMap().let { if (it.isEmpty()) null else DiscoveryNodeFilters.buildFromKeyValue(OR, it) }
         clusterExcludeFilters = settings.getByPrefix(CLUSTER_ROUTING_EXCLUDE_GROUP).getAsMap().let { if (it.isEmpty()) null else DiscoveryNodeFilters.buildFromKeyValue(OR, it) }
     }
 
-    override fun canMove(shard: ModelShard, destNode: ModelNode, moves: Collection<MoveAction>): Boolean {
+    override fun canAllocate(shard: ModelShard, destNode: ModelNode): Boolean {
         if (clusterExcludeFilters?.match(destNode.backingNode.node())   ?: false) { return false }
         if (!(clusterIncludeFilters?.match(destNode.backingNode.node()) ?: true)) { return false }
         if (!(clusterRequireFilters?.match(destNode.backingNode.node()) ?: true)) { return false }
         return true
+    }
+
+    override fun canMove(shard: ModelShard, destNode: ModelNode, moves: Collection<MoveAction>): Boolean {
+        return canAllocate(shard, destNode)
     }
 }
