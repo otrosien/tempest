@@ -75,7 +75,7 @@ class ShardSizeCalculator(settings: Settings, metadata: MetaData, private val cl
 
     init {
         // commas aren't perfect here since they can legally be defined in regexes but it seems reasonable for now;
-        // perpahs there is a more generic way to define groups
+        // perhaps there is a more generic way to define groups
         val indexPatterns = settings.get("tempest.balancer.groupingPatterns", "").split(",").map { safeCompile(it) }.filterNotNull()
         val modelAgeInMinutes = settings.getAsInt("tempest.balancer.modelAgeMinutes", 60*12)
         val modelTimestampThreshold = DateTime().minusMinutes(modelAgeInMinutes)
@@ -107,7 +107,10 @@ class ShardSizeCalculator(settings: Settings, metadata: MetaData, private val cl
     }
 
     fun estimateShardSize(shardRouting: ShardRouting) : Long {
-        return estimatedShardSizes.getIfAbsentPut(shardRouting, { Math.max(clusterInfo.getShardSize(shardRouting, 0), calculateEstimatedShardSize(shardRouting)) })
+        return estimatedShardSizes.getIfAbsentPut(shardRouting, {
+            arrayOf(actualShardSize(shardRouting),
+                    shardRouting.expectedShardSize,
+                    calculateEstimatedShardSize(shardRouting)).max() })
     }
 
     fun actualShardSize(shardRouting: ShardRouting) : Long {
