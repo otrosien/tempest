@@ -224,9 +224,7 @@ class ModelNode private constructor(val backingNode: RoutingNode, val nodeId: St
      * Note: currently using R^2 deviation from the norm as a score
      */
     fun calculateNodeScore(expectedUnitCapacity: Double): Double {
-        val nodeUsage = shards.map { it.size }.filter { it >= 0 }.sum()
-        val scaledUsage = nodeUsage / allocationScale
-        return (expectedUnitCapacity - scaledUsage).let { it * it }
+        return (expectedUnitCapacity - calculateNormalizedNodeUsage()).let { it * it }
     }
 
     /**
