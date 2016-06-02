@@ -311,7 +311,7 @@ class HeuristicBalancer(    settings: Settings,
             if (deciders.canAllocate(shard, node.backingNode, allocation) == Decision.NO) { continue }
             if (deciders.canRebalance(shard, allocation) == Decision.NO) { continue }
 
-            routingNodes.initialize(shard, node.backingNode.nodeId(), shardSize)
+            routingNodes.relocate(shard, node.backingNode.nodeId(), shardSize)
             return node
         }
 

@@ -40,7 +40,8 @@ class TempestShardsAllocatorITests {
     @Throws(Exception::class)
     fun setUp() {
         runner.onBuild { index, settingsBuilder ->
-            settingsBuilder.put("logger.com.simplymeasured.elasticsearch.plugins.tempest", "TRACE")
+            settingsBuilder.put("logger.com.simplymeasured.elasticsearch.plugins.tempest", "DEBUG")
+            settingsBuilder.put("logger.org.elasticsearch.cluster.routing.allocation", "DEBUG")
             settingsBuilder.put("tempest.balancer.groupingPatterns", "index-\\w+,index-\\w+-\\d+")
             
             settingsBuilder.put("plugin.types", "com.simplymeasured.elasticsearch.plugins.tempest.TempestPlugin")
