@@ -118,28 +118,38 @@ class ShardSizeCalculator(settings: Settings, metadata: MetaData, private val cl
     }
 
     private fun calculateEstimatedShardSize(shardRouting: ShardRouting): Long {
-        if (!youngIndexes.contains(shardRouting.index())) { return actualShardSize(shardRouting) }
+        if (!youngIndexes.contains(shardRouting.index())) {
+            // for older indexes we can usually trust the actual shard size but not when the shard is being initialized
+            // from a dead node. In those cases we need to "guess" the size by looking at started replicas with the
+            // same shard id on that index
+            return Math.max(actualShardSize(shardRouting), findLargestReplicaSize(shardRouting))
+        }
 
         val indexGroup = indexNameGroupMap.get(shardRouting.index)
         if (indexGroup == null || !indexGroup.hasModelIndexes()) { return actualShardSize(shardRouting) }
 
         if (indexGroup.isHomogeneous()) {
             return indexGroup.modelIndexes
-                    .map { findPrimaryShardById(it, shardRouting.id) }
-                    .map { clusterInfo.getShardSize(it, 0) }
+                    .map { findLargestShardSizeById(it.index, shardRouting.id) }
                     .average()
                     .toLong()
         }
 
         return indexGroup.modelIndexes
                 .flatMap { routingTable.index(it.index).shards.values() }
-                .map { it.value.primaryShard() }
-                .map { clusterInfo.getShardSize(it, 0) }
+                .map { findLargestShardSizeById(it.value.shardId().index, it.value.shardId.id) }
                 .average()
                 .toLong()
     }
 
-    private fun findPrimaryShardById(it: IndexMetaData, id: Int) = routingTable.index(it.index).shard(id).primaryShard()
+    private fun findLargestShardSizeById(index: String, id: Int) : Long =
+            routingTable.index(index)
+                        .shard(id)
+                        .map { clusterInfo.getShardSize(it, 0) }
+                        .max() ?: 0
+
+    private fun findLargestReplicaSize(shardRouting: ShardRouting): Long = findLargestShardSizeById(shardRouting.index(), shardRouting.id)
+
 
     fun patternMapping() : MapIterable<String, RichIterable<String>> = indexPatternGroupMap
             .keyValuesView()
