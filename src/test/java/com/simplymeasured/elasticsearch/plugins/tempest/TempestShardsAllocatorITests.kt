@@ -45,7 +45,6 @@ class TempestShardsAllocatorITests {
             settingsBuilder.put("logger.org.elasticsearch.cluster.routing.allocation", "DEBUG")
             settingsBuilder.put("tempest.balancer.groupingPatterns", "index-\\w+,index-\\w+-\\d+")
             
-            settingsBuilder.put("plugin.types", "com.simplymeasured.elasticsearch.plugins.tempest.TempestPlugin")
             settingsBuilder.put("cluster.routing.allocation.type", "com.simplymeasured.elasticsearch.plugins.tempest.TempestShardsAllocator")
             settingsBuilder.put("cluster.routing.allocation.same_shard.host", false)
             settingsBuilder.put("http.cors.enabled", true);
