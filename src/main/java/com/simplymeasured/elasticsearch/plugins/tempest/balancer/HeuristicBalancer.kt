@@ -39,17 +39,14 @@ import org.eclipse.collections.impl.list.mutable.ListAdapter.adapt
 import org.eclipse.collections.impl.utility.LazyIterate
 import org.elasticsearch.cluster.ClusterInfo
 import org.elasticsearch.cluster.InternalClusterInfoService
-import org.elasticsearch.cluster.routing.RoutingNode
-import org.elasticsearch.cluster.routing.RoutingNodes
-import org.elasticsearch.cluster.routing.ShardRouting
-import org.elasticsearch.cluster.routing.ShardRoutingState
+import org.elasticsearch.cluster.routing.*
 import org.elasticsearch.cluster.routing.allocation.RoutingAllocation
 import org.elasticsearch.cluster.routing.allocation.decider.AllocationDeciders
 import org.elasticsearch.cluster.routing.allocation.decider.ConcurrentRebalanceAllocationDecider
 import org.elasticsearch.cluster.routing.allocation.decider.Decision
 import org.elasticsearch.common.component.AbstractComponent
+import org.elasticsearch.common.joda.time.DateTime
 import org.elasticsearch.common.settings.Settings
-import org.joda.time.DateTime
 import java.util.*
 import kotlin.jvm.internal.iterator
 
@@ -107,7 +104,7 @@ class HeuristicBalancer(    settings: Settings,
                     move.sourceNode.backingNode.node().hostName,
                     move.destNode.backingNode.node().hostName)
 
-            routingNodes.relocate(move.shard.backingShard, move.destNode.nodeId, move.shard.backingShard.expectedShardSize)
+            routingNodes.relocate(move.shard.backingShard, move.destNode.nodeId)
         }
 
         balancerState.lastBalanceChangeDateTime = DateTime.now()
@@ -304,28 +301,26 @@ class HeuristicBalancer(    settings: Settings,
 
     private fun shouldMove(shard: ShardRouting) = deciders.canRemain(shard, routingNodes.node(shard.currentNodeId()), allocation).type() == Decision.Type.NO
 
-    private fun tryMove(shard: ShardRouting, nodes: ListIterable<ModelNode>) : ModelNode? {
-        val shardSize = shardSizeCalculator.estimateShardSize(shard)
+    private fun tryMove(shard: MutableShardRouting, nodes: ListIterable<ModelNode>) : ModelNode? {
 
         for (node in nodes) {
             if (deciders.canAllocate(shard, node.backingNode, allocation) == Decision.NO) { continue }
             if (deciders.canRebalance(shard, allocation) == Decision.NO) { continue }
 
-            routingNodes.relocate(shard, node.backingNode.nodeId(), shardSize)
+            routingNodes.relocate(shard, node.backingNode.nodeId())
             return node
         }
 
         return null
     }
 
-    private fun tryAllocation(shard: ShardRouting, nodes: ListIterable<ModelNode>) : ModelNode? {
-        val shardSize = shardSizeCalculator.estimateShardSize(shard)
+    private fun tryAllocation(shard: MutableShardRouting, nodes: ListIterable<ModelNode>) : ModelNode? {
 
         for (node in nodes) {
             val decision = deciders.canAllocate(shard, node.backingNode, allocation)
             if (decision == Decision.NO) { continue }
 
-            routingNodes.initialize(shard, node.backingNode.nodeId(), shardSize)
+            routingNodes.assign(shard, node.backingNode.nodeId())
             return node
         }
 

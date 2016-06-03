@@ -25,6 +25,7 @@
 package com.simplymeasured.elasticsearch.plugins.tempest
 
 import org.codelibs.elasticsearch.runner.ElasticsearchClusterRunner
+import org.elasticsearch.common.settings.ImmutableSettings
 import org.elasticsearch.common.settings.Settings
 import org.junit.After
 import org.junit.Before
@@ -64,9 +65,10 @@ class TempestShardsAllocatorITests {
     @Test
     @Throws(Exception::class)
     fun testTempestShardsAllocator() {
-        runner.createIndex("index-a", Settings.settingsBuilder().put("index.number_of_replicas", "2").build())
-        runner.createIndex("index-b", Settings.settingsBuilder().put("index.number_of_replicas", "2").build())
-        runner.createIndex("index-c-123", Settings.settingsBuilder().put("index.number_of_replicas", "2").build())
+
+        runner.createIndex("index-a", ImmutableSettings.builder().put("index.number_of_replicas", "2").build())
+        runner.createIndex("index-b", ImmutableSettings.builder().put("index.number_of_replicas", "2").build())
+        runner.createIndex("index-c-123", ImmutableSettings.builder().put("index.number_of_replicas", "2").build())
 
         while (true) {
         }

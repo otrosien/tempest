@@ -39,16 +39,17 @@ import org.elasticsearch.cluster.routing.RoutingTable
 import org.elasticsearch.cluster.routing.ShardRouting
 import org.elasticsearch.cluster.routing.ShardRoutingState
 import org.elasticsearch.cluster.routing.allocation.AllocationService
+import org.elasticsearch.cluster.routing.allocation.allocator.GatewayAllocator
 import org.elasticsearch.cluster.routing.allocation.allocator.ShardsAllocators
 import org.elasticsearch.cluster.routing.allocation.decider.ClusterRebalanceAllocationDecider
+import org.elasticsearch.common.collect.ImmutableMap
+import org.elasticsearch.common.joda.time.DateTime
+import org.elasticsearch.common.settings.ImmutableSettings
 import org.elasticsearch.common.settings.Settings
+import org.elasticsearch.gateway.none.NoneGatewayAllocator
 import org.elasticsearch.index.shard.ShardId
 import org.elasticsearch.node.settings.NodeSettingsService
-import org.elasticsearch.test.ESAllocationTestCase
-import org.elasticsearch.test.ESIntegTestCase
-import org.elasticsearch.test.ESTestCase
-import org.elasticsearch.test.gateway.NoopGatewayAllocator
-import org.joda.time.DateTime
+import org.elasticsearch.test.ElasticsearchAllocationTestCase
 import org.junit.Before
 import org.junit.Test
 import org.mockito.Mock
@@ -61,7 +62,7 @@ import java.security.PrivilegedAction
 /**
  * Created by awhite on 5/1/16.
  */
-class TempestShardsAllocatorTests : ESAllocationTestCase() {
+class TempestShardsAllocatorTests : ElasticsearchAllocationTestCase() {
 
     @Before
     fun setup() {
@@ -70,7 +71,7 @@ class TempestShardsAllocatorTests : ESAllocationTestCase() {
 
     @Test
     fun testBasicBalance() {
-        val settings = Settings.settingsBuilder()
+        val settings = ImmutableSettings.builder()
                 .put("cluster.routing.allocation.node_concurrent_recoveries", 10)
                 .put("cluster.routing.allocation.node_initial_primaries_recoveries", 10)
                 .put("cluster.routing.allocation.cluster_concurrent_rebalance", 8)
@@ -78,15 +79,16 @@ class TempestShardsAllocatorTests : ESAllocationTestCase() {
 
         val balancerState = BalancerState()
         val shardSizes = Maps.mutable.empty<String, Long>()
-        val testClusterInfo = ClusterInfo(Maps.mutable.empty(), Maps.mutable.empty(), shardSizes, Maps.mutable.empty())
+        val mockClusterInfo = mock(ClusterInfo::class.java)
         val mockClusterInfoService = mock(ClusterInfoService::class.java)
-        Mockito.`when`(mockClusterInfoService.clusterInfo).thenReturn(testClusterInfo)
+        Mockito.`when`(mockClusterInfoService.clusterInfo).thenReturn(mockClusterInfo)
+        Mockito.`when`(mockClusterInfo.shardSizes).thenReturn(shardSizes)
 
-        val strategy = MockAllocationService(
+        val strategy = AllocationService(
                 settings,
-                randomAllocationDeciders(settings, NodeSettingsService(Settings.Builder.EMPTY_SETTINGS), getRandom()),
-                ShardsAllocators(settings, NoopGatewayAllocator.INSTANCE, TempestShardsAllocator(settings, mockClusterInfoService, balancerState)),
-                EmptyClusterInfoService.INSTANCE)
+                randomAllocationDeciders(settings, NodeSettingsService(ImmutableSettings.EMPTY), getRandom()),
+                ShardsAllocators(settings, NoneGatewayAllocator(), TempestShardsAllocator(settings, mockClusterInfoService, balancerState)),
+                EmptyClusterInfoService.EMPTY)
 
         var (routingTable, clusterState) = createCluster(strategy)
 
@@ -98,7 +100,7 @@ class TempestShardsAllocatorTests : ESAllocationTestCase() {
         var modelCluster = ModelCluster(clusterState.routingNodes, shardSizeCalculator, Lists.mutable.empty(), getRandom())
         modelClusterTracker.add(modelCluster)
 
-        routingTable = strategy.reroute(clusterState, "reroute").routingTable()
+        routingTable = strategy.reroute(clusterState).routingTable()
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build()
 
 
@@ -120,14 +122,14 @@ class TempestShardsAllocatorTests : ESAllocationTestCase() {
         println(modelClusterTracker)
     }
 
-    protected fun createCluster(strategy: MockAllocationService): Pair<RoutingTable, ClusterState> {
+    protected fun createCluster(strategy: AllocationService): Pair<RoutingTable, ClusterState> {
 
         val indexes = (1..(5 + randomInt(10))).map { createRandomIndex(Integer.toHexString(it)) }
         val metaData = MetaData.builder().apply { indexes.forEach { this.put(it) } }.build()
         val routingTable = RoutingTable.builder().apply { indexes.forEach { this.addAsNew(metaData.index(it.index())) } }.build()
 
         val clusterState = ClusterState.builder(
-                org.elasticsearch.cluster.ClusterName.DEFAULT)
+                ClusterName.DEFAULT)
                 .metaData(metaData)
                 .routingTable(routingTable)
                 .nodes(DiscoveryNodes.builder().apply { (1..(3 + randomInt(20))).forEach { this.put(newNode("node${it}")) } })
@@ -139,7 +141,7 @@ class TempestShardsAllocatorTests : ESAllocationTestCase() {
     fun createRandomIndex(id: String): IndexMetaData.Builder {
         return IndexMetaData
                 .builder("index-${id}")
-                .settings(Settings.settingsBuilder()
+                .settings(ImmutableSettings.builder()
                         .put(IndexMetaData.SETTING_VERSION_CREATED, Version.CURRENT)
                         .put(IndexMetaData.SETTING_CREATION_DATE, DateTime().millis))
                 .numberOfShards(3 + randomInt(20))
@@ -152,7 +154,7 @@ class TempestShardsAllocatorTests : ESAllocationTestCase() {
         var resultClusterState: ClusterState = clusterState
 
         for (attempt in 1..100) {
-            resultRoutingTable = strategy.reroute(resultClusterState, "reroute").routingTable()
+            resultRoutingTable = strategy.reroute(resultClusterState).routingTable()
             resultClusterState = ClusterState.builder(resultClusterState).routingTable(resultRoutingTable).build()
 
             resultRoutingTable = strategy.applyStartedShards(resultClusterState, resultClusterState.routingNodes.shardsWithState(ShardRoutingState.INITIALIZING), false).routingTable()

@@ -35,7 +35,6 @@ import org.elasticsearch.common.settings.Settings
 import org.elasticsearch.common.xcontent.XContentBuilder
 import org.elasticsearch.common.xcontent.XContentFactory
 import org.elasticsearch.rest.*
-import org.joda.time.DateTime
 
 /**
  * Simple reporting REST handler that exposes balancer's stats on /_tempest

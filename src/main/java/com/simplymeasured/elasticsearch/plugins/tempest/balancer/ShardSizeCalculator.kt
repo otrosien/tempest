@@ -37,14 +37,15 @@ import org.eclipse.collections.impl.tuple.Tuples
 import org.eclipse.collections.impl.utility.ArrayIterate
 import org.eclipse.collections.impl.utility.LazyIterate
 import org.elasticsearch.cluster.ClusterInfo
+import org.elasticsearch.cluster.InternalClusterInfoService.shardIdentifierFromRouting
 import org.elasticsearch.cluster.metadata.IndexMetaData
 import org.elasticsearch.cluster.metadata.MetaData
 import org.elasticsearch.cluster.routing.RoutingNodes
 import org.elasticsearch.cluster.routing.RoutingTable
 import org.elasticsearch.cluster.routing.ShardRouting
 import org.elasticsearch.common.component.AbstractComponent
+import org.elasticsearch.common.joda.time.DateTime
 import org.elasticsearch.common.settings.Settings
-import org.joda.time.DateTime
 import java.util.regex.Pattern
 import java.util.regex.PatternSyntaxException
 
@@ -107,14 +108,11 @@ class ShardSizeCalculator(settings: Settings, metadata: MetaData, private val cl
     }
 
     fun estimateShardSize(shardRouting: ShardRouting) : Long {
-        return estimatedShardSizes.getIfAbsentPut(shardRouting, {
-            arrayOf(actualShardSize(shardRouting),
-                    shardRouting.expectedShardSize,
-                    calculateEstimatedShardSize(shardRouting)).max() })
+        return estimatedShardSizes.getIfAbsentPut(shardRouting, {calculateEstimatedShardSize(shardRouting)})
     }
 
     fun actualShardSize(shardRouting: ShardRouting) : Long {
-        return clusterInfo.getShardSize(shardRouting, 0)
+        return clusterInfo.shardSizes.get(shardIdentifierFromRouting(shardRouting)) ?: 0
     }
 
     private fun calculateEstimatedShardSize(shardRouting: ShardRouting): Long {
@@ -145,7 +143,7 @@ class ShardSizeCalculator(settings: Settings, metadata: MetaData, private val cl
     private fun findLargestShardSizeById(index: String, id: Int) : Long =
             routingTable.index(index)
                         .shard(id)
-                        .map { clusterInfo.getShardSize(it, 0) }
+                        .map { clusterInfo.shardSizes.get(shardIdentifierFromRouting(it)) ?: 0 }
                         .max() ?: 0
 
     private fun findLargestReplicaSize(shardRouting: ShardRouting): Long = findLargestShardSizeById(shardRouting.index(), shardRouting.id)

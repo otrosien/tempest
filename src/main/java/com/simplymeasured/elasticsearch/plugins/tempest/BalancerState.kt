@@ -29,7 +29,7 @@ import org.eclipse.collections.api.map.MapIterable
 import org.eclipse.collections.api.set.SetIterable
 import org.eclipse.collections.impl.factory.Maps
 import org.eclipse.collections.impl.factory.Sets
-import org.joda.time.DateTime
+import org.elasticsearch.common.joda.time.DateTime
 
 /**
  * A shared state used by the allocator, balancer, and rest endpoint for book keeping and reporting

@@ -32,10 +32,7 @@ import org.eclipse.collections.impl.factory.Sets
 import org.eclipse.collections.impl.tuple.Tuples
 import org.eclipse.collections.impl.utility.LazyIterate
 import org.elasticsearch.cluster.ClusterInfo
-import org.elasticsearch.cluster.routing.RoutingNode
-import org.elasticsearch.cluster.routing.RoutingNodes
-import org.elasticsearch.cluster.routing.ShardRouting
-import org.elasticsearch.cluster.routing.ShardRoutingState
+import org.elasticsearch.cluster.routing.*
 import java.util.*
 
 /**
@@ -108,13 +105,13 @@ class ModelCluster private constructor(
         // this method is not fast O(n) in terms of shard and node searching but is also used in non critical paths
         val localSourceNode = modelNodes.find { it.nodeId == moveAction.sourceNode.nodeId }!!
         val localDestNode = modelNodes.find { it.nodeId == moveAction.destNode.nodeId }!!
-        val localShard = localSourceNode.shards.find { it.backingShard.isSameShard(moveAction.shard.backingShard) }!!
+        val localShard = localSourceNode.shards.find { it.backingShard.shardId().equals(moveAction.shard.backingShard.shardId()) }!!
 
         localSourceNode.shards.remove(localShard)
         localDestNode.shards.add(localShard)
     }
 
-    fun applyShardInitialization(shard: ShardRouting, allocatedNode: ModelNode) {
+    fun applyShardInitialization(shard: MutableShardRouting, allocatedNode: ModelNode) {
         val modelShard = ModelShard(shard, size = shardSizeCalculator.actualShardSize(shard), estimatedSize = shardSizeCalculator.estimateShardSize(shard))
         modelShard.state = ShardRoutingState.INITIALIZING
         allocatedNode.shards.add(modelShard)
@@ -172,7 +169,7 @@ class ModelCluster private constructor(
         return top/bottom
     }
 
-    fun findBestNodesForShard(unassignedShard: ShardRouting) : ListIterable<ModelNode> {
+    fun findBestNodesForShard(unassignedShard: MutableShardRouting) : ListIterable<ModelNode> {
         val modelShard = ModelShard(unassignedShard, size = shardSizeCalculator.actualShardSize(unassignedShard), estimatedSize = shardSizeCalculator.estimateShardSize(unassignedShard))
         return modelNodes.select { node -> mockDeciders.all { decider -> decider.canAllocate(modelShard, node) } }
                          .toSortedList(Comparators.chain(
@@ -258,6 +255,6 @@ class ModelNode private constructor(val backingNode: RoutingNode, val nodeId: St
 /**
  * Model representation of a shard
  */
-data class ModelShard(val index: String, val id: Int, var state: ShardRoutingState, val primary: Boolean, val size: Long, val estimatedSize: Long, val backingShard: ShardRouting) {
-    constructor(shardRouting: ShardRouting, size: Long, estimatedSize: Long) : this(shardRouting.index(), shardRouting.id(), shardRouting.state(), shardRouting.primary(), size, estimatedSize, shardRouting)
+data class ModelShard(val index: String, val id: Int, var state: ShardRoutingState, val primary: Boolean, val size: Long, val estimatedSize: Long, val backingShard: MutableShardRouting) {
+    constructor(shardRouting: MutableShardRouting, size: Long, estimatedSize: Long) : this(shardRouting.index(), shardRouting.id(), shardRouting.state(), shardRouting.primary(), size, estimatedSize, shardRouting)
 }
