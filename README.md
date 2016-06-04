@@ -23,9 +23,18 @@ The following are some of the high level features that Tempest offers (see below
 
 Current supported versions:
 
-* 2.3.2
+| ES Version   | Plugin URL                                                                                     |
+| ------------ | -----------------------------------------------------------------------------------------------|
+| 2.2.3        | https://github.com/datarank/tempest/releases/download/v2.0.2-ES2.3.2/tempest-2.0.2-ES2.3.2.zip
+| 1.7.5        | https://github.com/datarank/tempest/releases/download/v2.0.2-ES1.7.5/tempest-2.0.2-ES1.7.5.zip
+| 1.5.2        | https://github.com/datarank/tempest/releases/download/v2.0.2-ES1.5.2/tempest-2.0.2-ES1.5.2.zip
+| 1.4.3        | https://github.com/datarank/tempest/releases/download/v2.0.2-ES1.4.3/tempest-2.0.2-ES1.4.3.zip
 
-How to obtain deliverable is TBD.
+NOTE: Starting with ES 2.x, plugins will not load unless the plugin descriptor `elasticsearch.version` matches the
+      server version *exactly*. Until we can find a way around this, it is very unlikely that we can have a tested
+      release for every version of ES. However, in most cases all that is required is a repacking that can be done
+      in-house. Simply fork this project, update `plugin-descriptor.properties`, run `mvn package`, and install the
+      .zip locally.
 
 ## How it Works
 
@@ -93,11 +102,12 @@ tempest.balancer.groupingPatterns: twitter-.*,\\.marvel-.*
 
 Notes:
 
-Indexes that do not match any group are placed in a default group.
+* Indexes that do not match any group are placed in a default group.
 
-If a group contains no model indexes then no shard size estimation is done.
+* If a group contains no model indexes then no shard size estimation is done.
 
-This feature can be disabled by setting the model age to 0
+* This feature can be disabled by setting the model age to 0 but be aware that this may cause many unassigned shards
+  to be allocated on the most under utilized node.
 
 ## Balance Status
 
