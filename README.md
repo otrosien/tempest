@@ -1,34 +1,107 @@
 # Tempest
-A pluggable balancer and shards allocator for Elasticsearch that balances a cluster based on shard sizes.
 
-Elasticsearch's default allocator assigns and balances shards to nodes based on index-level and cluster-level settings. However, this approach can cause storage and memory issues when resources are limited or shared with other services. The tempest plugin replaces Elasticsearch's default allocator with one that allocates and balances shards based on the cumulative shard sizes on each node in the cluster. Balancing the cluster in this manner results in drastically increased stability and performance on homogeneous clusters.
+## Overview
 
-# Relative Node Balancing
-The allocator attempts to minimize the ratio of the sizes of the most full node to the least full node. That is, it attempts to distribute shards throughtout the cluster such that maxNode.size() / minNode.size() is minimized until it is below the ratio specified by cluster.routing.allocation.probabilistic.range_ratio, or 1.5 by default.
+Tempest is a shard allocator and balancer for Elasticsearch. It is designed to balance by size rather than by shard
+count.
 
-# Elasticsearch Version Support
-Tempest is currently developed against Elasticsearch 1.4.2, but support has been tested up to Elasticsearch 1.7.1. Consequently, tempest can be used with an Elasticsearch cluster of any version in the range 1.4.2-1.7.1, and support may extend further. If there's a specific version you would like tested, please create an issue and we'll verify functionality.
+The default balancer for Elasticsearch attempts to balance a cluster by equally distributing shards. For most use cases
+this is sufficient; However, when custom routing is used, it is possible for some shards to have vastly different sizes.
 
-# Build
-If you prefer to build the plugin yourself rather than download from the releases page, you can do so very simply with maven. From project root directory:
+## Features
 
-    mvn clean package
-    
-Note that building yourself will append -SNAPSHOT to the the installable .zip file.
+The following are some of the high level features that Tempest offers (see below for details):
 
-# Installation
+* Heuristic balancing
+* Preemptive Balancing (in certain cases)
+* Risk and overhead aware balancing
+* Safety checks to prevent overly aggressive balancing
+* REST endpoint for monitoring balance state and stats
+* Highly Configurable
 
-Download the latest release from the releases page, then install it to your cluster using Elasticsearch's plugin script:
+## Install
 
-    elasticsearch-<es_version>/bin/plugin -url file:///path/to/tempest/target/releases/tempest-allocator-<version>.zip -install tempest
+Current supported versions:
 
-# Configuration (elasticsearch.yml)
+* 2.3.2
 
-    cluster.routing.allocation.type: com.datarank.tempest.allocator.LocalMinimumShardsAllocator
-(Required) Replaces elasticsearch's default BalancedShardsAllocator behavior with tempest's LocalMinimumShardsAllocator behavior.
+How to obtain deliverable is TBD.
 
-    cluster.routing.allocation.probabilistic.range_ratio : 1.5
-(Optional) Modify the max_node_total_shard_size:min_node_total_shard_size goal ratio. Tempest will attempt to rebalance the cluster until the ratio is below the specified value. Defaults to 1.5.
+## How it Works
 
-    cluster.routing.allocation.probabilistic.iterations : 3000
-(Optional) Modify the maximum number of random move operations that will be attempted during rebalance when searching for a better balanced cluster state. Defaults to (number of nodes * number of shards), where number of shards is primaries + replicas.
+Tempest uses a pseudo Monte-Carlo search algorithm coupled with a normalizing score function to find a series of moves
+that should put the cluster in a more balanced state while minimizing risk and minimizing network overheard. The basic
+process looks something like this:
+
+1. Create an internal model of the current cluster state
+2. Randomly generate several chains of moves (grouped in batches of size `cluster_concurrent_rebalance`)
+3. Find the top N best chains that produce the best cluster state
+4. Of the top N chains, select the one that minimizes risk and network overhead
+5. Apply the first batch of the best chain
+
+## Configuration
+
+All setting are dynamic and are reloaded for each rebalance request. The defaults should be reasonable for clusters of
+size 3 to 50 nodes.
+
+### Searching
+
+These settings control how Tempest will perform cluster move simulations:
+
+* `tempest.balancer.searchDepth` - The number of move batches deep to search (default 8)
+* `tempest.balancer.searchScaleFactor` - The number of move chains per search depth to consider (default 1000)
+* `tempest.balancer.searchQueueSize` - The number of best move chains to consider for final selection (default 10)
+* `tempest.balancer.minimumShardMovementOverhead` - The cost associated with moving a small shard (default 100000000)
+
+The defaults for the settings are pretty good for most cases. Larger clusters (100+ nodes) might benefit from a shallower
+search depth in favor of of a higher search scale factor.
+
+### Limiting
+
+These settings are used to prevent Tempest from being too aggressive or taking unnecessary risks when balancing.
+
+* `tempest.balancer.maximumAllowedRiskRate` - Maximum allowed percent increase of the largest node during a chain (default 1.10)
+* `tempest.balancer.forceRebalanceThresholdMinutes` - Maximum allowed time before a rebalance is forced (default 60); Note, does not actually schedule rebalances
+* `tempest.balancer.minimumNodeSizeChangeRate` - Required size change of the most changed node during a chain for the chain to be considered valid (default 0.10)
+
+If you know you have a lot of capacity in your cluster, then increasing the allowed risk might help find some better states
+when the cluster is already slightly balanced.
+
+The `forceRebalanceThresholdMinutes` is there to prevent excessive rebalancing in the event that Elasticsearch calls the
+rebalance too aggressively. The setting does not schedule rebalances in any way.
+
+In clusters with lots of very small shards, it may be necessary to reduce `minimumNodeSizeChangeRate` in order to prevent
+overly aggressive balancing.
+
+### Preemptive Balancing
+
+These setting define how Tempest will model new indexes for preemptive balancing. Tempest does preemptive balancing
+by grouping all indexes whose name matches a regex into a single group and then assuming that older indexes will act as
+models for what newer indexes will look like. Then, when new indexes are created that match a pattern group,
+their shards are allocated as if they were sized like the model indexes in that group.
+
+* `tempest.balancer.groupingPatterns` - Comma separated list of regexes used for model grouping (default blank)
+* `tempest.balancer.modelAgeMinutes` - Age in minutes at which an index is consider a model for preemptive balancing; Indexes newer than this are considered young and will be estimated using models (default 720)
+
+Example:
+
+Ths will create two groups, one for indexes like `twitter-` and one for indexes like `.marvel-`:
+
+```
+tempest.balancer.groupingPatterns: twitter-.*,\\.marvel-.*
+```
+
+Notes:
+
+Indexes that do not match any group are placed in a default group.
+
+If a group contains no model indexes then no shard size estimation is done.
+
+This feature can be disabled by setting the model age to 0
+
+## Balance Status
+
+Tempest exposes a REST endpoint that is useful for verifying configuration and for seeing various stats. To access
+the endpoint simply `GET` `http://hostname:9200/_tempest`
+
+
