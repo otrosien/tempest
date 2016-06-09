@@ -25,7 +25,7 @@ Current supported versions:
 
 | ES Version   | Plugin URL                                                                                     |
 | ------------ | -----------------------------------------------------------------------------------------------|
-| 2.2.3        | https://github.com/datarank/tempest/releases/download/v2.0.2-ES2.3.2/tempest-2.0.2-ES2.3.2.zip
+| 2.3.2        | https://github.com/datarank/tempest/releases/download/v2.0.2-ES2.3.2/tempest-2.0.2-ES2.3.2.zip
 | 1.7.5        | https://github.com/datarank/tempest/releases/download/v2.0.2-ES1.7.5/tempest-2.0.2-ES1.7.5.zip
 | 1.5.2        | https://github.com/datarank/tempest/releases/download/v2.0.2-ES1.5.2/tempest-2.0.2-ES1.5.2.zip
 | 1.4.3        | https://github.com/datarank/tempest/releases/download/v2.0.2-ES1.4.3/tempest-2.0.2-ES1.4.3.zip
