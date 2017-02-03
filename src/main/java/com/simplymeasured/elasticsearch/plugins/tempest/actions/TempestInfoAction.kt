@@ -1,6 +1,6 @@
 /*
  * The MIT License (MIT)
- * Copyright (c) 2016 DataRank, Inc.
+ * Copyright (c) 2017 DataRank, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -22,20 +22,27 @@
  *
  */
 
-package com.simplymeasured.elasticsearch.plugins.tempest
+package com.simplymeasured.elasticsearch.plugins.tempest.actions
 
-import com.simplymeasured.elasticsearch.plugins.tempest.handlers.TempestInfoRestHandler
-import com.simplymeasured.elasticsearch.plugins.tempest.handlers.TempestRebalanceRestHandler
-import org.elasticsearch.cluster.ClusterModule
-import org.elasticsearch.cluster.routing.allocation.allocator.ShardsAllocator
-import org.elasticsearch.cluster.routing.allocation.allocator.ShardsAllocators
-import org.elasticsearch.common.inject.AbstractModule
-import org.elasticsearch.common.inject.Inject
+import org.elasticsearch.action.Action
+import org.elasticsearch.action.admin.cluster.health.ClusterHealthAction
+import org.elasticsearch.client.ElasticsearchClient
 
-class TempestModule : AbstractModule() {
+/**
+ * Action definition for tempest info
+ */
+class TempestInfoAction:
+        Action<TempestInfoRequest, TempestInfoResponse, TempestInfoRequestBuilder>(NAME) {
 
-    override fun configure() {
-        bind(TempestRebalanceRestHandler::class.java).asEagerSingleton()
-        bind(TempestInfoRestHandler::class.java).asEagerSingleton()
+    companion object {
+        val INSTANCE = TempestInfoAction()
+        val NAME = "cluster:monitor/tempest"
+    }
+
+    override fun newResponse(): TempestInfoResponse = TempestInfoResponse()
+
+    override fun newRequestBuilder(client: ElasticsearchClient): TempestInfoRequestBuilder {
+        return TempestInfoRequestBuilder(client, this)
     }
 }
+

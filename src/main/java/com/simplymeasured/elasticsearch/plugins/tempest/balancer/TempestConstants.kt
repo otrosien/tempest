@@ -1,6 +1,6 @@
 /*
  * The MIT License (MIT)
- * Copyright (c) 2016 DataRank, Inc.
+ * Copyright (c) 2017 DataRank, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -22,20 +22,17 @@
  *
  */
 
-package com.simplymeasured.elasticsearch.plugins.tempest
+package com.simplymeasured.elasticsearch.plugins.tempest.balancer
 
-import com.simplymeasured.elasticsearch.plugins.tempest.handlers.TempestInfoRestHandler
-import com.simplymeasured.elasticsearch.plugins.tempest.handlers.TempestRebalanceRestHandler
-import org.elasticsearch.cluster.ClusterModule
-import org.elasticsearch.cluster.routing.allocation.allocator.ShardsAllocator
-import org.elasticsearch.cluster.routing.allocation.allocator.ShardsAllocators
-import org.elasticsearch.common.inject.AbstractModule
-import org.elasticsearch.common.inject.Inject
-
-class TempestModule : AbstractModule() {
-
-    override fun configure() {
-        bind(TempestRebalanceRestHandler::class.java).asEagerSingleton()
-        bind(TempestInfoRestHandler::class.java).asEagerSingleton()
+class TempestConstants {
+    companion object {
+        val SEARCH_DEPTH = "tempest.balancer.searchDepth"
+        val SEARCH_SCALE_FACTOR = "tempest.balancer.searchScaleFactor"
+        val SEARCH_QUEUE_SIZE = "tempest.balancer.searchQueueSize"
+        val MINIMUM_SHARD_MOVEMENT_OVERHEAD = "tempest.balancer.minimumShardMovementOverhead"
+        val MAXIMUM_ALLOWED_RISK_RATE = "tempest.balancer.maximumAllowedRiskRate"
+        val FORCE_REBALANCE_THRESHOLD_MINUTES = "tempest.balancer.forceRebalanceThresholdMinutes"
+        val MINIMUM_NODE_SIZE_CHANGE_RATE = "tempest.balancer.minimumNodeSizeChangeRate"
+        val EXPUNGE_BLACKLISTED_NODES = "tempest.balancer.expungeBlacklistedNodes"
     }
 }

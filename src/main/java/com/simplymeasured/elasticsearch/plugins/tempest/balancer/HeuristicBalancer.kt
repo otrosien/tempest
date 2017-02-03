@@ -24,10 +24,17 @@
 
 package com.simplymeasured.elasticsearch.plugins.tempest.balancer
 
-import com.simplymeasured.elasticsearch.plugins.tempest.BalancerState
 import com.simplymeasured.elasticsearch.plugins.tempest.balancer.MockDeciders.sameNodeDecider
 import com.simplymeasured.elasticsearch.plugins.tempest.balancer.MockDeciders.shardStateDecider
 import com.simplymeasured.elasticsearch.plugins.tempest.balancer.MockDeciders.shardIdAlreadyMoving
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.TempestConstants.Companion.EXPUNGE_BLACKLISTED_NODES
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.TempestConstants.Companion.FORCE_REBALANCE_THRESHOLD_MINUTES
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.TempestConstants.Companion.MAXIMUM_ALLOWED_RISK_RATE
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.TempestConstants.Companion.MINIMUM_NODE_SIZE_CHANGE_RATE
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.TempestConstants.Companion.MINIMUM_SHARD_MOVEMENT_OVERHEAD
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.TempestConstants.Companion.SEARCH_DEPTH
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.TempestConstants.Companion.SEARCH_QUEUE_SIZE
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.TempestConstants.Companion.SEARCH_SCALE_FACTOR
 import org.eclipse.collections.api.block.function.Function2
 import org.eclipse.collections.api.block.function.primitive.IntObjectToIntFunction
 import org.eclipse.collections.api.list.ListIterable
@@ -39,6 +46,7 @@ import org.eclipse.collections.impl.list.mutable.ListAdapter.adapt
 import org.eclipse.collections.impl.utility.LazyIterate
 import org.elasticsearch.cluster.ClusterInfo
 import org.elasticsearch.cluster.InternalClusterInfoService
+import org.elasticsearch.cluster.node.DiscoveryNodeFilters
 import org.elasticsearch.cluster.routing.RoutingNode
 import org.elasticsearch.cluster.routing.RoutingNodes
 import org.elasticsearch.cluster.routing.ShardRouting
@@ -46,7 +54,9 @@ import org.elasticsearch.cluster.routing.ShardRoutingState
 import org.elasticsearch.cluster.routing.allocation.RoutingAllocation
 import org.elasticsearch.cluster.routing.allocation.decider.AllocationDeciders
 import org.elasticsearch.cluster.routing.allocation.decider.ConcurrentRebalanceAllocationDecider
+import org.elasticsearch.cluster.routing.allocation.decider.ConcurrentRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_CLUSTER_CONCURRENT_REBALANCE
 import org.elasticsearch.cluster.routing.allocation.decider.Decision
+import org.elasticsearch.cluster.routing.allocation.decider.FilterAllocationDecider
 import org.elasticsearch.common.component.AbstractComponent
 import org.elasticsearch.common.settings.Settings
 import org.joda.time.DateTime
@@ -61,23 +71,23 @@ import kotlin.jvm.internal.iterator
 class HeuristicBalancer(    settings: Settings,
                         val allocation: RoutingAllocation,
                         val shardSizeCalculator: ShardSizeCalculator,
-                        val balancerState: BalancerState,
+                        val balancerConfiguration: BalancerConfiguration,
                         val random: Random) : AbstractComponent(settings) {
 
     private val routingNodes: RoutingNodes = allocation.routingNodes()
     private val deciders: AllocationDeciders = allocation.deciders()
     private val mockDeciders: ListIterable<MockDecider> = Lists.mutable.of(sameNodeDecider, shardStateDecider, shardIdAlreadyMoving, MockFilterAllocationDecider(settings))
-    private val baseModelCluster: ModelCluster = ModelCluster(routingNodes, shardSizeCalculator, mockDeciders, random)
-    private val concurrentRebalanceSetting: Int = settings.getAsInt(ConcurrentRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_CLUSTER_CONCURRENT_REBALANCE, 4).let { if (it == -1) 4 else it }
-    private val searchDepthSetting: Int = settings.getAsInt("tempest.balancer.searchDepth", 8)
-    private val searchScaleFactor: Int = settings.getAsInt("tempest.balancer.searchScaleFactor", 1000)
-    private val bestNQueueSize: Int = settings.getAsInt("tempest.balancer.searchQueueSize", 10)
-    private val minimumShardMovementOverhead: Long = settings.getAsLong("tempest.balancer.minimumShardMovementOverhead", 100000000)
-    private val maximumAllowedRiskRate: Double = settings.getAsDouble("tempest.balancer.maximumAllowedRiskRate", 1.10)
-    private val forceRebalanceThresholdMinutes: Int = settings.getAsInt("tempest.balancer.forceRebalanceThresholdMinutes", 60)
-    private val minimumNodeSizeChangeRate: Double = settings.getAsDouble("tempest.balancer.minimumNodeSizeChangeRate", 0.10)
+
+    private val baseModelCluster: ModelCluster = ModelCluster(
+            routingNodes = routingNodes,
+            blacklistFilter = balancerConfiguration.clusterExcludeFilter,
+            shardSizeCalculator = shardSizeCalculator,
+            mockDeciders = mockDeciders,
+            expungeBlacklistedNodes = balancerConfiguration.expungeBlacklistedNodes,
+            random = random)
+
     private val initalClusterScore: Double = baseModelCluster.calculateBalanceScore()
-    private val maximumAllowedRisk: Double = baseModelCluster.calculateRisk() * maximumAllowedRiskRate * maximumAllowedRiskRate
+    private val maximumAllowedRisk: Double = baseModelCluster.calculateRisk() * balancerConfiguration.maximumAllowedRiskRate * balancerConfiguration.maximumAllowedRiskRate
     private val noopMoveChain : MoveChain = MoveChain.Companion.buildOptimalMoveChain(Lists.mutable.of(MoveActionBatch(emptyList<MoveAction>(), 0, 0.0, initalClusterScore)))
 
     init {
@@ -88,16 +98,15 @@ class HeuristicBalancer(    settings: Settings,
      * rebalance the cluster using a heuristic random sampling approach
      */
     fun rebalance(): Boolean {
-        updateBalancerState()
-        if (!rebalancePreconditionsCheck()) { return false }
+        if (!rebalancePreconditionsCheck()) {
+            return false
+        }
 
         val bestMoveChain = findBestNextMoveChain(baseModelCluster)
         val nextMoveBatch = bestMoveChain.moveBatches.first()
 
         if (nextMoveBatch.moves.isEmpty()) {
-            logger.debug("balanced complete - score: {} ratio: {}", initalClusterScore, baseModelCluster.calculateBalanceRatio())
-            balancerState.lastStableStructuralHash = baseModelCluster.calculateStructuralHash()
-            balancerState.lastOptimalBalanceFoundDateTime = DateTime.now()
+            logger.debug("balanced complete - score: {}", initalClusterScore)
             return false
         }
 
@@ -107,18 +116,13 @@ class HeuristicBalancer(    settings: Settings,
                     move.sourceNode.backingNode.node().hostName,
                     move.destNode.backingNode.node().hostName)
 
-            routingNodes.relocate(move.shard.backingShard, move.destNode.nodeId, move.shard.backingShard.expectedShardSize)
+            routingNodes.relocate(
+                    move.shard.backingShard,
+                    move.destNode.nodeId,
+                    move.shard.backingShard.expectedShardSize)
         }
 
-        balancerState.lastBalanceChangeDateTime = DateTime.now()
-
         return true
-    }
-
-    private fun updateBalancerState() {
-        balancerState.clusterScore = initalClusterScore
-        balancerState.clusterRisk = baseModelCluster.calculateRisk()
-        balancerState.clusterBalanceRatio = baseModelCluster.calculateBalanceRatio()
     }
 
     private fun findBestNextMoveChain(modelCluster: ModelCluster) : MoveChain {
@@ -152,26 +156,29 @@ class HeuristicBalancer(    settings: Settings,
     }
 
     fun findGoodMoveChains(modelCluster: ModelCluster): List<MoveChain> {
-        val searchWindowSize = searchScaleFactor * concurrentRebalanceSetting;
-        val bestNQueue = MinimumNQueue<MoveChain>(bestNQueueSize, {it.score})
-        val searchCounter = Counter();
+        val searchWindowSize = balancerConfiguration.searchScaleFactor * balancerConfiguration.concurrentRebalanceSetting
+        val bestNQueue = MinimumNQueue<MoveChain>(balancerConfiguration.bestNQueueSize, {it.score})
+        val searchCounter = Counter()
 
         while (searchCounter.count < searchWindowSize) {
             try {
                 val hypotheticalCluster = ModelCluster(modelCluster)
-                val moveChain = createRandomMoveChain(hypotheticalCluster, concurrentRebalanceSetting, searchDepthSetting)
+                val moveChain = createRandomMoveChain(
+                        hypotheticalCluster,
+                        balancerConfiguration.concurrentRebalanceSetting,
+                        balancerConfiguration.searchDepthSetting)
 
-                if (    moveChain.score < initalClusterScore &&
-                        moveChain.risk <= maximumAllowedRisk &&
-                        bestNQueue.tryAdd(moveChain)) {
+                if (isValidChain(moveChain) && bestNQueue.tryAdd(moveChain)) {
                     searchCounter.reset()
                 }
             } catch (e : NoLegalMoveFound) { /* ignore */}
             searchCounter.increment()
         }
 
-        return bestNQueue.asList().filter { calculateBestNodeUsageImprovementFromBase(it) >= minimumNodeSizeChangeRate }
+        return bestNQueue.asList().filter { calculateBestNodeUsageImprovementFromBase(it) >= balancerConfiguration.minimumNodeSizeChangeRate }
     }
+
+    private fun isValidChain(moveChain: MoveChain): Boolean = (moveChain.score < initalClusterScore && moveChain.risk <= maximumAllowedRisk)
 
     private fun calculateBestNodeUsageImprovementFromBase(it: MoveChain) = baseModelCluster.findBestNodeUsageImprovement(ModelCluster(baseModelCluster).apply { applyMoveChain(it) })
 
@@ -192,14 +199,14 @@ class HeuristicBalancer(    settings: Settings,
         val moves: MutableList<MoveAction> = Lists.mutable.empty()
 
         for (moveNumber in 1..size) {
-            val move = modelCluster.makeRandomMove(moves)
+            val move = modelCluster.makeRandomMove(moves) ?: break
             moves.add(move)
         }
 
-        val risk = modelCluster.calculateRisk();
+        val risk = modelCluster.calculateRisk()
         modelCluster.stabilizeCluster()
-        val score = modelCluster.calculateBalanceScore();
-        val overhead = moves.map { Math.max(it.shard.size, minimumShardMovementOverhead) }.sum()
+        val score = modelCluster.calculateBalanceScore()
+        val overhead = moves.map { Math.max(it.shard.size, balancerConfiguration.minimumShardMovementOverhead) }.sum()
 
         return MoveActionBatch(moves, overhead, risk, score)
     }
@@ -220,9 +227,9 @@ class HeuristicBalancer(    settings: Settings,
             return false
         }
 
-        if (concurrentRebalanceSetting == 0) {
+        if (balancerConfiguration.concurrentRebalanceSetting == 0) {
             logger.debug("rebalance disabled")
-            return false;
+            return false
         }
 
         if (initalClusterScore == 0.0) {
@@ -232,17 +239,6 @@ class HeuristicBalancer(    settings: Settings,
             return false
         }
 
-        if (DateTime.now().minusMinutes(forceRebalanceThresholdMinutes).isAfter(balancerState.lastOptimalBalanceFoundDateTime) &&
-            DateTime.now().minusMinutes(forceRebalanceThresholdMinutes).isAfter(balancerState.lastBalanceChangeDateTime)) {
-            logger.debug("forcing rebalance due to time threshold expiration")
-            return true;
-        }
-
-        if (baseModelCluster.calculateStructuralHash() == balancerState.lastStableStructuralHash ) {
-            logger.debug("cluster appears to already be balanced")
-            return false;
-        }
-
         return true
     }
 
@@ -250,7 +246,7 @@ class HeuristicBalancer(    settings: Settings,
      * Attempt to allocate unallocated shards using a round-robin scheme
      *
      * Note: This does not leverage random sampling like the rebalance method. Instead, the goal is to get the shards
-     *       allocated quickly and then let the rebalancer logic move any small shards around.
+     *       allocated quickly and then let the rebalance logic move any small shards around.
      */
     fun allocateUnassigned(): Boolean {
         if (!routingNodes.hasUnassignedShards() || routingNodes.count() <= 1) { return false }

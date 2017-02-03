@@ -37,15 +37,9 @@ import org.elasticsearch.common.settings.Settings
  * Note: Index awareness is not not implemented. Node awareness should be fully supported.
  */
 class MockFilterAllocationDecider(settings: Settings) : MockDecider {
-    private val clusterRequireFilters: DiscoveryNodeFilters?
-
-    private val clusterIncludeFilters: DiscoveryNodeFilters?
-    private val clusterExcludeFilters: DiscoveryNodeFilters?
-    init {
-        clusterRequireFilters = settings.getByPrefix(CLUSTER_ROUTING_REQUIRE_GROUP).getAsMap().let { if (it.isEmpty()) null else DiscoveryNodeFilters.buildFromKeyValue(AND, it) }
-        clusterIncludeFilters = settings.getByPrefix(CLUSTER_ROUTING_INCLUDE_GROUP).getAsMap().let { if (it.isEmpty()) null else DiscoveryNodeFilters.buildFromKeyValue(OR, it) }
-        clusterExcludeFilters = settings.getByPrefix(CLUSTER_ROUTING_EXCLUDE_GROUP).getAsMap().let { if (it.isEmpty()) null else DiscoveryNodeFilters.buildFromKeyValue(OR, it) }
-    }
+    private val clusterRequireFilters: DiscoveryNodeFilters? = settings.getByPrefix(CLUSTER_ROUTING_REQUIRE_GROUP).getAsMap().let { if (it.isEmpty()) null else DiscoveryNodeFilters.buildFromKeyValue(AND, it) }
+    private val clusterIncludeFilters: DiscoveryNodeFilters? = settings.getByPrefix(CLUSTER_ROUTING_INCLUDE_GROUP).getAsMap().let { if (it.isEmpty()) null else DiscoveryNodeFilters.buildFromKeyValue(OR, it) }
+    private val clusterExcludeFilters: DiscoveryNodeFilters? = settings.getByPrefix(CLUSTER_ROUTING_EXCLUDE_GROUP).getAsMap().let { if (it.isEmpty()) null else DiscoveryNodeFilters.buildFromKeyValue(OR, it) }
 
     override fun canAllocate(shard: ModelShard, destNode: ModelNode): Boolean {
         if (clusterExcludeFilters?.match(destNode.backingNode.node())   ?: false) { return false }

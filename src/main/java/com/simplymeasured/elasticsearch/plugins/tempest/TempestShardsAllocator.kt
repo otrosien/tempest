@@ -24,12 +24,12 @@
 
 package com.simplymeasured.elasticsearch.plugins.tempest
 
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.BalancerConfiguration
 import com.simplymeasured.elasticsearch.plugins.tempest.balancer.HeuristicBalancer
 import com.simplymeasured.elasticsearch.plugins.tempest.balancer.MockDeciders
 import com.simplymeasured.elasticsearch.plugins.tempest.balancer.ShardSizeCalculator
 import org.eclipse.collections.impl.factory.Sets
-import org.elasticsearch.cluster.ClusterInfoService
-import org.elasticsearch.cluster.InternalClusterInfoService
+import org.elasticsearch.cluster.*
 import org.elasticsearch.cluster.routing.allocation.FailedRerouteAllocation
 import org.elasticsearch.cluster.routing.allocation.RoutingAllocation
 import org.elasticsearch.cluster.routing.allocation.StartedRerouteAllocation
@@ -37,7 +37,10 @@ import org.elasticsearch.cluster.routing.allocation.allocator.ShardsAllocator
 import org.elasticsearch.cluster.routing.allocation.decider.FilterAllocationDecider
 import org.elasticsearch.common.component.AbstractComponent
 import org.elasticsearch.common.inject.Inject
+import org.elasticsearch.common.inject.Singleton
 import org.elasticsearch.common.settings.Settings
+import org.elasticsearch.index.settings.IndexSettingsService
+import org.elasticsearch.node.settings.NodeSettingsService
 import org.joda.time.DateTime
 import java.util.*
 
@@ -45,34 +48,64 @@ import java.util.*
  * Tempest Shards Allocator that delegates to a Heuristic Balancer
  */
 
+@Singleton
 class TempestShardsAllocator
     @Inject constructor(    settings: Settings,
-                        val clusterInfoService: ClusterInfoService,
-                        val balancerState: BalancerState) :
+                            settingsService: NodeSettingsService,
+                        val clusterService: ClusterService,
+                        val clusterInfoService: ClusterInfoService) :
         AbstractComponent(settings), ShardsAllocator {
+
+    var balancerConfiguration: BalancerConfiguration = BalancerConfiguration(settings)
+    var effectiveSettings: Settings = settings
+    var lastRebalanceAttemptDateTime: DateTime = DateTime(0)
+    var lastBalanceChangeDateTime: DateTime = DateTime(0)
+    var lastOptimalBalanceFoundDateTime: DateTime = DateTime(0)
+    var  status: String = "unknown"
+
+    init {
+        settingsService.addListener({
+            settings -> balancerConfiguration = BalancerConfiguration(settings, balancerConfiguration)
+                        effectiveSettings = Settings.builder().put(effectiveSettings).put(settings).build()
+        })
+    }
 
     override fun rebalance(allocation: RoutingAllocation): Boolean {
         val shardSizeCalculator = buildShardSizeCalculator(allocation)
 
-        balancerState.lastRebalanceAttemptDateTime = DateTime.now()
+        lastRebalanceAttemptDateTime = DateTime()
 
         return HeuristicBalancer(
-                settings,
+                effectiveSettings,
                 allocation,
                 shardSizeCalculator,
-                balancerState,
-                Random()).rebalance();
+                balancerConfiguration,
+                Random()).rebalance().apply {
+            if (this == true) {
+                lastBalanceChangeDateTime = DateTime()
+                status = "balancing"
+            }
+            else {
+                lastOptimalBalanceFoundDateTime = DateTime()
+                status = "balanced"
+            }
+        }
     }
 
     override fun allocateUnassigned(allocation: RoutingAllocation): Boolean {
         val shardSizeCalculator = buildShardSizeCalculator(allocation)
+
         if (allocation.routingNodes().hasUnassignedShards()) {
             return HeuristicBalancer(
-                    settings,
+                    effectiveSettings,
                     allocation,
                     shardSizeCalculator,
-                    balancerState,
-                    Random()).allocateUnassigned()
+                    balancerConfiguration,
+                    Random()).allocateUnassigned().apply {
+                if (this == true) {
+                    status = "allocating"
+                }
+            }
         }
 
         return false
@@ -84,24 +117,30 @@ class TempestShardsAllocator
 
     override fun moveShards(allocation: RoutingAllocation): Boolean {
         val shardSizeCalculator = buildShardSizeCalculator(allocation)
+
         return HeuristicBalancer(
-                settings,
+                effectiveSettings,
                 allocation,
                 shardSizeCalculator,
-                balancerState,
-                Random()).moveShards();
+                balancerConfiguration,
+                Random()).moveShards().apply {
+            if (this == true) {
+                status = "moving"
+            }
+        }
     }
 
     override fun applyStartedShards(allocation: StartedRerouteAllocation) {
         /* ONLY FOR GATEWAYS */
     }
 
-    private fun buildShardSizeCalculator(allocation: RoutingAllocation): ShardSizeCalculator {
-        val shardSizeCalculator = ShardSizeCalculator(settings, allocation.metaData(), clusterInfoService.clusterInfo, allocation.routingTable())
-        balancerState.youngIndexes = shardSizeCalculator.youngIndexes()
-        balancerState.patternMapping = shardSizeCalculator.patternMapping()
-        return shardSizeCalculator
-    }
-
+    internal fun buildShardSizeCalculator(allocation: RoutingAllocation): ShardSizeCalculator =
+            ShardSizeCalculator(
+                    effectiveSettings,
+                    allocation.metaData(),
+                    allocation.clusterInfo(),
+                    allocation.routingTable())
 }
+
+
 
