@@ -27,6 +27,7 @@ package com.simplymeasured.elasticsearch.plugins.tempest.balancer
 import org.eclipse.collections.api.RichIterable
 import org.eclipse.collections.api.list.ListIterable
 import org.eclipse.collections.api.map.MapIterable
+import org.eclipse.collections.api.map.MutableMap
 import org.eclipse.collections.api.set.SetIterable
 import org.eclipse.collections.impl.factory.Lists
 import org.eclipse.collections.impl.factory.Maps
@@ -65,13 +66,17 @@ import java.util.regex.PatternSyntaxException
  *
  * Note, any indexes not matching a pattern are placed into a "default" group
  */
-class ShardSizeCalculator(settings: Settings, metadata: MetaData, private val clusterInfo: ClusterInfo, private val routingTable: RoutingTable) : AbstractComponent(settings) {
+class ShardSizeCalculator(
+        settings: Settings,
+        metadata: MetaData,
+        private val clusterInfo: ClusterInfo,
+        private val routingTable: RoutingTable) : AbstractComponent(settings) {
     private val indexNameGroupMap = Maps.mutable.empty<String, IndexGroup>()
     private val estimatedShardSizes = Maps.mutable.empty<ShardRouting, Long>()
     private val defaultGroup = IndexGroup()
     private val allGroup = IndexGroup()
     private val youngIndexes = Sets.mutable.empty<String>()
-    val indexPatternGroupMap = Maps.mutable.empty<Pattern, IndexGroup>()
+    val indexPatternGroupMap: MutableMap<Pattern, IndexGroup> = Maps.mutable.empty<Pattern, IndexGroup>()
 
     init {
         // commas aren't perfect here since they can legally be defined in regexes but it seems reasonable for now;
@@ -101,8 +106,8 @@ class ShardSizeCalculator(settings: Settings, metadata: MetaData, private val cl
         try {
             return Pattern.compile(it)
         } catch(e: PatternSyntaxException) {
-            logger.warn("failed to compile group pattern ${it}");
-            return null;
+            logger.warn("failed to compile group pattern ${it}")
+            return null
         }
     }
 
@@ -160,7 +165,7 @@ class ShardSizeCalculator(settings: Settings, metadata: MetaData, private val cl
     fun youngIndexes() : SetIterable<String> = youngIndexes
 }
 
-class IndexGroup() {
+class IndexGroup {
     val modelIndexes = Lists.mutable.empty<IndexMetaData>()
     val youngIndexes = Lists.mutable.empty<IndexMetaData>()
 

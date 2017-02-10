@@ -1,6 +1,6 @@
 /*
  * The MIT License (MIT)
- * Copyright (c) 2016 DataRank, Inc.
+ * Copyright (c) 2017 DataRank, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -22,20 +22,16 @@
  *
  */
 
-package com.simplymeasured.elasticsearch.plugins.tempest
+package com.simplymeasured.elasticsearch.plugins.tempest.actions
 
-import com.simplymeasured.elasticsearch.plugins.tempest.handlers.TempestInfoRestHandler
-import com.simplymeasured.elasticsearch.plugins.tempest.handlers.TempestRebalanceRestHandler
-import org.elasticsearch.cluster.ClusterModule
-import org.elasticsearch.cluster.routing.allocation.allocator.ShardsAllocator
-import org.elasticsearch.cluster.routing.allocation.allocator.ShardsAllocators
-import org.elasticsearch.common.inject.AbstractModule
-import org.elasticsearch.common.inject.Inject
+import org.elasticsearch.action.admin.cluster.health.ClusterHealthAction
+import org.elasticsearch.action.admin.cluster.health.ClusterHealthRequest
+import org.elasticsearch.action.support.master.MasterNodeReadOperationRequestBuilder
+import org.elasticsearch.client.ElasticsearchClient
 
-class TempestModule : AbstractModule() {
-
-    override fun configure() {
-        bind(TempestRebalanceRestHandler::class.java).asEagerSingleton()
-        bind(TempestInfoRestHandler::class.java).asEagerSingleton()
-    }
+class TempestInfoRequestBuilder(client: ElasticsearchClient, action: TempestInfoAction):
+        MasterNodeReadOperationRequestBuilder<TempestInfoRequest, TempestInfoResponse, TempestInfoRequestBuilder>(
+                client,
+                action,
+                TempestInfoRequest()) {
 }

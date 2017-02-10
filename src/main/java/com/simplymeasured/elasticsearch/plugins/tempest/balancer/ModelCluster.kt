@@ -25,10 +25,13 @@
 package com.simplymeasured.elasticsearch.plugins.tempest.balancer
 
 import org.eclipse.collections.api.list.ListIterable
+import org.eclipse.collections.api.list.MutableList
+import org.eclipse.collections.api.set.SetIterable
 import org.eclipse.collections.api.tuple.Pair
 import org.eclipse.collections.impl.block.factory.Comparators
 import org.eclipse.collections.impl.block.factory.Functions
 import org.eclipse.collections.impl.factory.Sets
+import org.eclipse.collections.impl.list.mutable.FastList
 import org.eclipse.collections.impl.tuple.Tuples
 import org.eclipse.collections.impl.utility.LazyIterate
 import org.elasticsearch.cluster.ClusterInfo
@@ -45,44 +48,62 @@ class ModelCluster private constructor(
         val modelNodes: ListIterable<ModelNode>,
         val mockDeciders: ListIterable<MockDecider>,
         val shardSizeCalculator: ShardSizeCalculator,
+        val expungeBlacklistedNodes: Boolean,
         val random: Random) {
 
     /**
      * main constructor used for creating a base model from ES provided data
      */
-    constructor(routingNodes: RoutingNodes, shardSizeCalculator: ShardSizeCalculator, mockDeciders: ListIterable<MockDecider>, random: Random) :
-        this (LazyIterate.adapt(routingNodes).collect { ModelNode(it, shardSizeCalculator) }.toList(),
-              mockDeciders,
-              shardSizeCalculator,
-              random)
+    constructor(routingNodes: RoutingNodes,
+                blacklistFilter: (RoutingNode) -> Boolean,
+                shardSizeCalculator: ShardSizeCalculator,
+                mockDeciders: ListIterable<MockDecider>,
+                expungeBlacklistedNodes: Boolean,
+                random: Random) :
+        this (modelNodes = LazyIterate.adapt(routingNodes)
+                                      .collect { it -> ModelNode.buildModelNode(
+                                              node = it,
+                                              expungeBlacklistedNodes = expungeBlacklistedNodes,
+                                              blacklistFilter = blacklistFilter,
+                                              shardSizeCalculator = shardSizeCalculator) }
+                                      .toList(),
+              mockDeciders = mockDeciders,
+              shardSizeCalculator = shardSizeCalculator,
+              expungeBlacklistedNodes = expungeBlacklistedNodes,
+              random = random)
 
     /**
      * deep copy constructor
      */
     constructor(other: ModelCluster) :
-        this(other.modelNodes.collect { ModelNode(it) },
-             other.mockDeciders,
-             other.shardSizeCalculator,
-             other.random)
-
+        this(modelNodes = other.modelNodes.collect(::ModelNode),
+             mockDeciders = other.mockDeciders,
+             shardSizeCalculator = other.shardSizeCalculator,
+             expungeBlacklistedNodes = other.expungeBlacklistedNodes,
+             random = other.random)
 
     companion object {
         val MAX_MOVE_ATTEMPTS = 1000
     }
 
+    val sourceNodes: ListIterable<ModelNode> = if (expungeableShardsExist()) modelNodes.select { it.isExpunging && it.shards.notEmpty() }
+                                               else                          modelNodes.select { !it.isBlacklisted && it.shards.notEmpty()}
+
+    val destinationNodes: ListIterable<ModelNode> = modelNodes.select { !it.isBlacklisted }
     val expectedUnitCapacity: Double = calculateExpectedUnitCapacity()
+
+    private fun expungeableShardsExist() = modelNodes.select { it.isExpunging }
+                                                     .anySatisfy { it.shards.isNotEmpty() }
 
     /**
      * Attempt to make a random move that attempts to satisfy all mock deciders
-     *
-     * @throws NoLegalMoveFound if no moves can be found after MAX_MOVE_ATTEMPTS
      */
-    fun makeRandomMove(previousMoves: Collection<MoveAction>): MoveAction {
+    fun makeRandomMove(previousMoves: Collection<MoveAction>): MoveAction? {
         for (attempt in 0..MAX_MOVE_ATTEMPTS) {
-            val sourceNode = modelNodes.get(random.nextInt(modelNodes.size()))
+            val sourceNode = findValidSourceNode()
             if (sourceNode.shards.isEmpty()) { continue }
 
-            val destNode = modelNodes.get(random.nextInt(modelNodes.size()))
+            val destNode = findValidDestinationNode()
             val shard = sourceNode.shards.get(random.nextInt(sourceNode.shards.size))
 
             if (mockDeciders.all { it.canMove(shard, destNode, previousMoves) }) {
@@ -92,8 +113,12 @@ class ModelCluster private constructor(
             }
         }
 
-        throw NoLegalMoveFound()
+        return null
     }
+
+    private fun findValidDestinationNode() = destinationNodes.get(random.nextInt(destinationNodes.size()))
+
+    private fun findValidSourceNode() = sourceNodes.get(random.nextInt(sourceNodes.size()))
 
     fun applyMoveChain(moveChain: MoveChain) {
         moveChain.moveBatches.forEach { applyMoveActionBatch(it) }
@@ -130,30 +155,27 @@ class ModelCluster private constructor(
 
     /**
      * Calculate the balance score for the entire cluster
+     *
+     * NOTE: for blacklisted nodes while an expunge is happening we treat their capacity as 0 since we are trying to
+     *       move everything off of them
      */
-    fun calculateBalanceScore(): Double = modelNodes.fold(0.0, { score, node -> score + node.calculateNodeScore(expectedUnitCapacity) })
+    fun calculateBalanceScore(): Double = modelNodes.fold(
+            0.0,
+            { score, node -> score + node.calculateNodeScore(expectedUnitCapacity) })
 
     /**
      * Calculate the risk for the cluster.
      *
      * Note this is currently defined in terms of the size of the most over-capacity node in the cluster
      */
-    fun calculateRisk(): Double = modelNodes.map { it.calculateNodeScore(expectedUnitCapacity) }.max() ?: 0.0
-
-    /**
-     * Calculate the ratio of the most over and under capacity nodes (excluding empty nodes)
-     *
-     * Note: A ratio of 1.0 is ideal and lowest possible ratio. Good ratios should be between 1.0 and 1.4
-     */
-    fun calculateBalanceRatio() : Double = modelNodes
-            .map { it.calculateNormalizedNodeUsage() }
-            .filter { it > 0.0 }
-            .let { (it.max() ?: Double.MAX_VALUE)  / (it.min() ?: Double.MAX_VALUE) }
+    fun calculateRisk(): Double = modelNodes
+            .map { it.calculateNodeScore(expectedUnitCapacity) }
+            .max() ?: 0.0
 
     private fun calculateExpectedUnitCapacity(): Double {
         val shards = modelNodes.flatMap { it.shards }
         val totalNodeSize = shards.map { it.estimatedSize }.filterNot { it < 0 }.sum().toDouble()
-        val totalClusterCapacity = modelNodes.map { it.allocationScale }.sum()
+        val totalClusterCapacity = destinationNodes.map { it.allocationScale }.sum()
         return totalNodeSize / totalClusterCapacity
     }
 
@@ -174,20 +196,11 @@ class ModelCluster private constructor(
 
     fun findBestNodesForShard(unassignedShard: ShardRouting) : ListIterable<ModelNode> {
         val modelShard = ModelShard(unassignedShard, size = shardSizeCalculator.actualShardSize(unassignedShard), estimatedSize = shardSizeCalculator.estimateShardSize(unassignedShard))
-        return modelNodes.select { node -> mockDeciders.all { decider -> decider.canAllocate(modelShard, node) } }
-                         .toSortedList(Comparators.chain(
-                                 Comparators.byFunction<ModelNode, Double> {it.calculateNormalizedNodeUsage()},
-                                 Comparators.byFunction<ModelNode, Int> {it.shards.size}))
+        return destinationNodes.select { node -> mockDeciders.all { decider -> decider.canAllocate(modelShard, node) } }
+                               .toSortedList(Comparators.chain(
+                                       Comparators.byFunction<ModelNode, Double> {it.calculateNormalizedNodeUsage()},
+                                       Comparators.byFunction<ModelNode, Int> {it.shards.size}))
     }
-
-    /**
-     * Calculate a numeric hash that represents the structure of the cluster.
-     *
-     * Logically, this is attempting to create a hash from an order agnostic representation of the nodes and their shards.
-     * Functionally, this is used for determining if the cluster has changed in any meaningful way without persisting
-     * the entire model cluster to memory (which would hold onto some critical and possibly large ES structures)
-     */
-    fun calculateStructuralHash(): Int =  modelNodes.map { it.calculateStructuralHash() }.toHashSet().hashCode()
 
     override fun toString(): String {
         return modelNodes
@@ -202,21 +215,50 @@ class ModelCluster private constructor(
 /**
  * Model representation of a Node and its shards
  */
-class ModelNode private constructor(val backingNode: RoutingNode, val nodeId: String, val shards: MutableList<ModelShard>, val allocationScale: Double) {
+class ModelNode private constructor(
+        val backingNode: RoutingNode,
+        val nodeId: String,
+        val shards: MutableList<ModelShard>,
+        val allocationScale: Double,
+        val isBlacklisted: Boolean,
+        val isExpunging: Boolean) {
+
     /**
      * Deep Copy Constructor
      */
     constructor(other: ModelNode) :
-        this(other.backingNode, other.nodeId, other.shards.map { it.copy() }.toMutableList(), other.allocationScale)
+        this(other.backingNode,
+             other.nodeId,
+             other.shards.collect { it.copy() },
+             other.allocationScale,
+             other.isBlacklisted,
+             other.isExpunging)
 
     /**
      * main constructor used when creating a base model from ES data structures
      */
-    constructor(routingNode: RoutingNode, shardSizeCalculator: ShardSizeCalculator) :
+    constructor(routingNode: RoutingNode,
+                shardSizeCalculator: ShardSizeCalculator,
+                isBlacklisted: Boolean,
+                isExpunging: Boolean) :
         this(routingNode,
              routingNode.nodeId(),
-             routingNode.copyShards().map { ModelShard(it, shardSizeCalculator.actualShardSize(it), shardSizeCalculator.estimateShardSize(it)) }.toMutableList(),
-             routingNode.node().attributes.getOrElse("allocation.scale", { "1.0" }).toDouble())
+             routingNode.copyShards().map { ModelShard(it, shardSizeCalculator.actualShardSize(it), shardSizeCalculator.estimateShardSize(it)) }.toFastList(),
+             routingNode.node().attributes.getOrElse("allocation.scale", { "1.0" }).toDouble(),
+             isBlacklisted,
+             isExpunging)
+
+    companion object {
+        internal fun buildModelNode(
+                node: RoutingNode,
+                shardSizeCalculator: ShardSizeCalculator,
+                blacklistFilter: (RoutingNode) -> Boolean,
+                expungeBlacklistedNodes: Boolean): ModelNode {
+
+            val blacklisted = blacklistFilter(node)
+            return ModelNode(node, shardSizeCalculator, blacklisted, expungeBlacklistedNodes && blacklisted)
+        }
+    }
 
     /**
      * Calculate the node's wighted score (used for cluster risk and scoring)
@@ -224,7 +266,8 @@ class ModelNode private constructor(val backingNode: RoutingNode, val nodeId: St
      * Note: currently using R^2 deviation from the norm as a score
      */
     fun calculateNodeScore(expectedUnitCapacity: Double): Double {
-        return (expectedUnitCapacity - calculateNormalizedNodeUsage()).let { it * it }
+        val effectiveCapacity = if (isExpunging) 0.0 else expectedUnitCapacity
+        return (effectiveCapacity - calculateNormalizedNodeUsage()).let { it * it }
     }
 
     /**
@@ -251,9 +294,9 @@ class ModelNode private constructor(val backingNode: RoutingNode, val nodeId: St
             }
         }
     }
-
-    fun calculateStructuralHash(): Int = shards.map { (it.index + it.id).hashCode() }.toHashSet().apply { add(nodeId.hashCode()) }.hashCode()
 }
+
+private fun <T> Iterable<T>.toFastList(): MutableList<T> = FastList.newList(this)
 
 /**
  * Model representation of a shard

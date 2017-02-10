@@ -25,7 +25,7 @@ Current supported versions:
 
 | ES Version   | Plugin URL                                                                                     |
 | ------------ | -----------------------------------------------------------------------------------------------|
-| 2.3.2        | https://github.com/datarank/tempest/releases/download/v2.0.2-ES2.3.2/tempest-2.0.2-ES2.3.2.zip
+| 2.3.2        | https://github.com/datarank/tempest/releases/download/v2.1.0-ES2.3.2/tempest-2.1.0-ES2.3.2.zip
 | 1.7.5        | https://github.com/datarank/tempest/releases/download/v2.0.2-ES1.7.5/tempest-2.0.2-ES1.7.5.zip
 | 1.5.2        | https://github.com/datarank/tempest/releases/download/v2.0.2-ES1.5.2/tempest-2.0.2-ES1.5.2.zip
 | 1.4.3        | https://github.com/datarank/tempest/releases/download/v2.0.2-ES1.4.3/tempest-2.0.2-ES1.4.3.zip
@@ -61,7 +61,8 @@ These settings control how Tempest will perform cluster move simulations:
 * `tempest.balancer.searchScaleFactor` - The number of move chains per search depth to consider (default 1000)
 * `tempest.balancer.searchQueueSize` - The number of best move chains to consider for final selection (default 10)
 * `tempest.balancer.minimumShardMovementOverhead` - The cost associated with moving a small shard (default 100000000)
-
+* `tempest.balancer.expungeBlacklistedNodes` - If true then shards on blacklisted nodes are moved to non-blacklisted nodes
+ 
 The defaults for the settings are pretty good for most cases. Larger clusters (100+ nodes) might benefit from a shallower
 search depth in favor of of a higher search scale factor.
 
@@ -70,14 +71,10 @@ search depth in favor of of a higher search scale factor.
 These settings are used to prevent Tempest from being too aggressive or taking unnecessary risks when balancing.
 
 * `tempest.balancer.maximumAllowedRiskRate` - Maximum allowed percent increase of the largest node during a chain (default 1.10)
-* `tempest.balancer.forceRebalanceThresholdMinutes` - Maximum allowed time before a rebalance is forced (default 60); Note, does not actually schedule rebalances
 * `tempest.balancer.minimumNodeSizeChangeRate` - Required size change of the most changed node during a chain for the chain to be considered valid (default 0.10)
 
 If you know you have a lot of capacity in your cluster, then increasing the allowed risk might help find some better states
 when the cluster is already slightly balanced.
-
-The `forceRebalanceThresholdMinutes` is there to prevent excessive rebalancing in the event that Elasticsearch calls the
-rebalance too aggressively. The setting does not schedule rebalances in any way.
 
 In clusters with lots of very small shards, it may be necessary to reduce `minimumNodeSizeChangeRate` in order to prevent
 overly aggressive balancing.
