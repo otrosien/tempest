@@ -3,7 +3,8 @@
 ## Overview
 
 Tempest is a shard allocator and balancer for Elasticsearch. It is designed to balance by size rather than by shard
-count.
+count. Additionally, Tempest tries to optimize primary shard placement to maximize bulk loading performance and 
+OS page cache hit rates.    
 
 The default balancer for Elasticsearch attempts to balance a cluster by equally distributing shards. For most use cases
 this is sufficient; However, when custom routing is used, it is possible for some shards to have vastly different sizes.
@@ -51,14 +52,15 @@ process looks something like this:
 ## Configuration
 
 All setting are dynamic and are reloaded for each rebalance request. The defaults should be reasonable for clusters of
-size 3 to 50 nodes.
+size 3 to 100 nodes.
 
 ### Searching
 
 These settings control how Tempest will perform cluster move simulations:
 
-* `tempest.balancer.searchDepth` - The number of move batches deep to search (default 8)
+* `tempest.balancer.searchDepth` - The number of move batches deep to search (default 5)
 * `tempest.balancer.searchScaleFactor` - The number of move chains per search depth to consider (default 1000)
+* `tempest.balancer.maxSearchTimeSeconds` - The maximum number of seconds to spend searching for a better state (default 5) 
 * `tempest.balancer.searchQueueSize` - The number of best move chains to consider for final selection (default 10)
 * `tempest.balancer.minimumShardMovementOverhead` - The cost associated with moving a small shard (default 100000000)
 * `tempest.balancer.expungeBlacklistedNodes` - If true then shards on blacklisted nodes are moved to non-blacklisted nodes
@@ -70,14 +72,11 @@ search depth in favor of of a higher search scale factor.
 
 These settings are used to prevent Tempest from being too aggressive or taking unnecessary risks when balancing.
 
-* `tempest.balancer.maximumAllowedRiskRate` - Maximum allowed percent increase of the largest node during a chain (default 1.10)
-* `tempest.balancer.minimumNodeSizeChangeRate` - Required size change of the most changed node during a chain for the chain to be considered valid (default 0.10)
+* `tempest.balancer.maximumAllowedRiskRate` - Maximum allowed percent increase of the largest node during a chain (default 1.25)
+* `tempest.balancer.minimumNodeSizeChangeRate` - Required relative score change of the most changed scoring group during a chain for the chain to be considered valid (default 0.25)
 
 If you know you have a lot of capacity in your cluster, then increasing the allowed risk might help find some better states
 when the cluster is already slightly balanced.
-
-In clusters with lots of very small shards, it may be necessary to reduce `minimumNodeSizeChangeRate` in order to prevent
-overly aggressive balancing.
 
 ### Preemptive Balancing
 

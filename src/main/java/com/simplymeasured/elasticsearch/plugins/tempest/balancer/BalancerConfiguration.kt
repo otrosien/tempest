@@ -24,9 +24,9 @@
 
 package com.simplymeasured.elasticsearch.plugins.tempest.balancer
 
+import com.simplymeasured.elasticsearch.plugins.tempest.TempestConstants
 import org.elasticsearch.cluster.node.DiscoveryNodeFilters
 import org.elasticsearch.cluster.routing.RoutingNode
-import org.elasticsearch.cluster.routing.allocation.decider.ConcurrentRebalanceAllocationDecider
 import org.elasticsearch.cluster.routing.allocation.decider.ConcurrentRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_CLUSTER_CONCURRENT_REBALANCE
 import org.elasticsearch.cluster.routing.allocation.decider.FilterAllocationDecider
 import org.elasticsearch.common.settings.Settings
@@ -42,19 +42,21 @@ class BalancerConfiguration(val concurrentRebalanceSetting: Int,
                             val maximumAllowedRiskRate: Double,
                             val minimumNodeSizeChangeRate: Double,
                             val expungeBlacklistedNodes: Boolean,
-                            val clusterExcludeFilter: (RoutingNode) -> Boolean) {
+                            val clusterExcludeFilter: (RoutingNode) -> Boolean,
+                            val searchTimeLimitSeconds: Long) {
 
     constructor(settings: Settings) : this(
             concurrentRebalanceSetting = settings.getAsInt(CLUSTER_ROUTING_ALLOCATION_CLUSTER_CONCURRENT_REBALANCE, 4)
                                                  .let { if (it == -1) 4 else it },
-            searchDepthSetting = settings.getAsInt(TempestConstants.SEARCH_DEPTH, 8),
+            searchDepthSetting = settings.getAsInt(TempestConstants.SEARCH_DEPTH, 5),
             searchScaleFactor = settings.getAsInt(TempestConstants.SEARCH_SCALE_FACTOR, 1000),
             bestNQueueSize = settings.getAsInt(TempestConstants.SEARCH_QUEUE_SIZE, 10),
             minimumShardMovementOverhead = settings.getAsLong(TempestConstants.MINIMUM_SHARD_MOVEMENT_OVERHEAD, 100000000),
-            maximumAllowedRiskRate = settings.getAsDouble(TempestConstants.MAXIMUM_ALLOWED_RISK_RATE, 1.10),
-            minimumNodeSizeChangeRate = settings.getAsDouble(TempestConstants.MINIMUM_NODE_SIZE_CHANGE_RATE, 0.10),
+            maximumAllowedRiskRate = settings.getAsDouble(TempestConstants.MAXIMUM_ALLOWED_RISK_RATE, 1.25),
+            minimumNodeSizeChangeRate = settings.getAsDouble(TempestConstants.MINIMUM_NODE_SIZE_CHANGE_RATE, 0.25),
             expungeBlacklistedNodes = settings.getAsBoolean(TempestConstants.EXPUNGE_BLACKLISTED_NODES, false),
-            clusterExcludeFilter = buildBlacklistFilter(settings, { false }))
+            clusterExcludeFilter = buildBlacklistFilter(settings, { false }),
+            searchTimeLimitSeconds = settings.getAsLong(TempestConstants.MAXIMUM_SEARCH_TIME_SECONDS, 5))
 
     constructor(settings: Settings, other: BalancerConfiguration) : this(
             concurrentRebalanceSetting = settings.getAsInt(CLUSTER_ROUTING_ALLOCATION_CLUSTER_CONCURRENT_REBALANCE, other.concurrentRebalanceSetting),
@@ -65,9 +67,8 @@ class BalancerConfiguration(val concurrentRebalanceSetting: Int,
             maximumAllowedRiskRate = settings.getAsDouble(TempestConstants.MAXIMUM_ALLOWED_RISK_RATE, other.maximumAllowedRiskRate),
             minimumNodeSizeChangeRate = settings.getAsDouble(TempestConstants.MINIMUM_NODE_SIZE_CHANGE_RATE, other.minimumNodeSizeChangeRate),
             expungeBlacklistedNodes = settings.getAsBoolean(TempestConstants.EXPUNGE_BLACKLISTED_NODES, other.expungeBlacklistedNodes),
-            clusterExcludeFilter = buildBlacklistFilter(settings, other.clusterExcludeFilter))
-
-
+            clusterExcludeFilter = buildBlacklistFilter(settings, other.clusterExcludeFilter),
+            searchTimeLimitSeconds = settings.getAsLong(TempestConstants.MAXIMUM_SEARCH_TIME_SECONDS, other.searchTimeLimitSeconds))
 }
 
 private fun buildBlacklistFilter(settings: Settings, defaultFilter: (RoutingNode) -> Boolean): (RoutingNode) -> Boolean =

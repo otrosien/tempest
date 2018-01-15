@@ -24,9 +24,9 @@
 
 package com.simplymeasured.elasticsearch.plugins.tempest.balancer
 
+import org.eclipse.collections.api.list.ListIterable
+
 /**
  * Capture the moves for a given batch plus some cluster stats assuming the batch is applied
  */
-class MoveActionBatch(val moves: List<MoveAction>, val overhead: Long, val risk: Double, val score: Double) {
-
-}
+class MoveActionBatch(val moves: ListIterable<MoveAction>, val overhead: Long, val risk: Double, val score: Double)

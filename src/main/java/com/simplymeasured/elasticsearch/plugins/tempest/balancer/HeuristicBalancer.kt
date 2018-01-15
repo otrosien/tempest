@@ -24,44 +24,30 @@
 
 package com.simplymeasured.elasticsearch.plugins.tempest.balancer
 
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.MockDeciders.sameNodeDecider
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.MockDeciders.shardStateDecider
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.MockDeciders.shardIdAlreadyMoving
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.TempestConstants.Companion.EXPUNGE_BLACKLISTED_NODES
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.TempestConstants.Companion.FORCE_REBALANCE_THRESHOLD_MINUTES
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.TempestConstants.Companion.MAXIMUM_ALLOWED_RISK_RATE
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.TempestConstants.Companion.MINIMUM_NODE_SIZE_CHANGE_RATE
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.TempestConstants.Companion.MINIMUM_SHARD_MOVEMENT_OVERHEAD
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.TempestConstants.Companion.SEARCH_DEPTH
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.TempestConstants.Companion.SEARCH_QUEUE_SIZE
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.TempestConstants.Companion.SEARCH_SCALE_FACTOR
-import org.eclipse.collections.api.block.function.Function2
-import org.eclipse.collections.api.block.function.primitive.IntObjectToIntFunction
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.model.*
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.model.MockDeciders.sameNodeDecider
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.model.MockDeciders.shardIdAlreadyMoving
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.model.MockDeciders.shardStateDecider
+import org.eclipse.collections.api.LazyIterable
 import org.eclipse.collections.api.list.ListIterable
+import org.eclipse.collections.api.list.MutableList
+import org.eclipse.collections.api.map.MapIterable
 import org.eclipse.collections.impl.Counter
 import org.eclipse.collections.impl.factory.Lists
-import org.eclipse.collections.impl.factory.Sets
-import org.eclipse.collections.impl.list.mutable.ListAdapter
-import org.eclipse.collections.impl.list.mutable.ListAdapter.adapt
 import org.eclipse.collections.impl.utility.LazyIterate
-import org.elasticsearch.cluster.ClusterInfo
-import org.elasticsearch.cluster.InternalClusterInfoService
-import org.elasticsearch.cluster.node.DiscoveryNodeFilters
-import org.elasticsearch.cluster.routing.RoutingNode
+import org.elasticsearch.cluster.metadata.MetaData
 import org.elasticsearch.cluster.routing.RoutingNodes
 import org.elasticsearch.cluster.routing.ShardRouting
 import org.elasticsearch.cluster.routing.ShardRoutingState
 import org.elasticsearch.cluster.routing.allocation.RoutingAllocation
 import org.elasticsearch.cluster.routing.allocation.decider.AllocationDeciders
-import org.elasticsearch.cluster.routing.allocation.decider.ConcurrentRebalanceAllocationDecider
-import org.elasticsearch.cluster.routing.allocation.decider.ConcurrentRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_CLUSTER_CONCURRENT_REBALANCE
 import org.elasticsearch.cluster.routing.allocation.decider.Decision
-import org.elasticsearch.cluster.routing.allocation.decider.FilterAllocationDecider
 import org.elasticsearch.common.component.AbstractComponent
 import org.elasticsearch.common.settings.Settings
-import org.joda.time.DateTime
+import org.elasticsearch.index.shard.ShardId
+import java.lang.Math.abs
 import java.util.*
-import kotlin.jvm.internal.iterator
+import java.util.concurrent.TimeUnit
 
 /**
  * Main shard balancer
@@ -69,60 +55,128 @@ import kotlin.jvm.internal.iterator
  * For details on the algorithm and usage see the project's README
  */
 class HeuristicBalancer(    settings: Settings,
+                            shardSizeCalculator: ShardSizeCalculator,
                         val allocation: RoutingAllocation,
-                        val shardSizeCalculator: ShardSizeCalculator,
                         val balancerConfiguration: BalancerConfiguration,
                         val random: Random) : AbstractComponent(settings) {
 
     private val routingNodes: RoutingNodes = allocation.routingNodes()
     private val deciders: AllocationDeciders = allocation.deciders()
-    private val mockDeciders: ListIterable<MockDecider> = Lists.mutable.of(sameNodeDecider, shardStateDecider, shardIdAlreadyMoving, MockFilterAllocationDecider(settings))
-
-    private val baseModelCluster: ModelCluster = ModelCluster(
-            routingNodes = routingNodes,
-            blacklistFilter = balancerConfiguration.clusterExcludeFilter,
-            shardSizeCalculator = shardSizeCalculator,
-            mockDeciders = mockDeciders,
-            expungeBlacklistedNodes = balancerConfiguration.expungeBlacklistedNodes,
+    private val shardSizes: MapIterable<ShardId, IndexSizingGroup.ShardSizeInfo> =
+            shardSizeCalculator.buildShardSizeInfo(allocation)
+    val baseModelCluster = buildModelCluster(
+            routingNodes = allocation.routingNodes(),
+            metaData = allocation.metaData(),
+            shardSizes = shardSizes,
+            settings = settings,
+            balancerConfiguration = balancerConfiguration,
             random = random)
-
     private val initalClusterScore: Double = baseModelCluster.calculateBalanceScore()
-    private val maximumAllowedRisk: Double = baseModelCluster.calculateRisk() * balancerConfiguration.maximumAllowedRiskRate * balancerConfiguration.maximumAllowedRiskRate
-    private val noopMoveChain : MoveChain = MoveChain.Companion.buildOptimalMoveChain(Lists.mutable.of(MoveActionBatch(emptyList<MoveAction>(), 0, 0.0, initalClusterScore)))
+    private val expungingMode: Boolean = baseModelCluster.expungeableShardsExist()
+    private val maximumAllowedRisk: Double = if (expungingMode) Double.MAX_VALUE
+                                             else baseModelCluster.calculateRisk() * balancerConfiguration.maximumAllowedRiskRate
+    private val noopMoveChain : MoveChain = MoveChain.noopMoveChain(initalClusterScore)
 
     init {
         if (logger.isTraceEnabled) {logger.trace(baseModelCluster.toString())}
+    }
+
+    companion object {
+
+        fun buildModelCluster(
+                routingNodes: RoutingNodes,
+                metaData: MetaData,
+                shardSizes: MapIterable<ShardId, IndexSizingGroup.ShardSizeInfo>,
+                settings: Settings,
+                balancerConfiguration: BalancerConfiguration,
+                random: Random): ModelCluster {
+
+            val expungeBlacklistedNodes = balancerConfiguration.expungeBlacklistedNodes
+            val blacklistFilter = balancerConfiguration.clusterExcludeFilter
+
+            val mockDeciders: ListIterable<MockDecider> =
+                    Lists.mutable.of(
+                            sameNodeDecider,
+                            shardStateDecider,
+                            shardIdAlreadyMoving,
+                            MockFilterAllocationDecider(settings))
+
+            val totalCapacityUnits = routingNodes
+                    .let { LazyIterate.adapt(it) }
+                    .reject { expungeBlacklistedNodes && blacklistFilter.invoke(it) }
+                    .sumOfDouble{ it.node().attributes.getOrElse("allocation.scale", { "1.0" }).toDouble() }
+
+            val shardScoreGroups = ShardScoreGroup.buildShardScoreGroupsForIndexes(
+                    metaData,
+                    shardSizes,
+                    routingNodes.count(),
+                    totalCapacityUnits)
+
+            val modelNodes = LazyIterate.
+                    adapt(routingNodes)
+                    .collect { it ->
+                        val isBlacklisted = blacklistFilter.invoke(it)
+                        ModelNode(
+                                routingNode = it,
+                                shardSizes = shardSizes,
+                                shardScoreGroups = shardScoreGroups,
+                                isBlacklisted = isBlacklisted,
+                                isExpunging = isBlacklisted && expungeBlacklistedNodes)
+                    }
+                    .toList()
+
+            return ModelCluster(
+                    modelNodes = modelNodes,
+                    mockDeciders = mockDeciders,
+                    shardSizes = shardSizes,
+                    shardScoreGroups = shardScoreGroups,
+                    expungeBlacklistedNodes = expungeBlacklistedNodes,
+                    random = random)
+        }
     }
 
     /**
      * rebalance the cluster using a heuristic random sampling approach
      */
     fun rebalance(): Boolean {
-        if (!rebalancePreconditionsCheck()) {
-            return false
-        }
+        if (!rebalancePreconditionsCheck()) return false
 
         val bestMoveChain = findBestNextMoveChain(baseModelCluster)
-        val nextMoveBatch = bestMoveChain.moveBatches.first()
+        val nextMoveBatch = bestMoveChain.moveBatches.firstOrNull()
 
-        if (nextMoveBatch.moves.isEmpty()) {
-            logger.debug("balanced complete - score: {}", initalClusterScore)
+        if (nextMoveBatch == null) {
+            logScoreInfo()
             return false
         }
 
         for (move in nextMoveBatch.moves) {
             logger.debug("applying move of {} from {} to {}",
-                    move.shard.backingShard.shardId(),
-                    move.sourceNode.backingNode.node().hostName,
-                    move.destNode.backingNode.node().hostName)
+                    move.shard.shardId(),
+                    move.sourceNode.node().hostName,
+                    move.destNode.node().hostName)
 
             routingNodes.relocate(
-                    move.shard.backingShard,
-                    move.destNode.nodeId,
-                    move.shard.backingShard.expectedShardSize)
+                    move.shard,
+                    move.destNode.nodeId(),
+                    move.overhead)
         }
 
         return true
+    }
+
+    private fun logScoreInfo() {
+        logger.debug("balanced complete - score: {}", initalClusterScore)
+        logger.debug("node scores - {}", baseModelCluster.calculateShardScores())
+        baseModelCluster.modelNodes.forEach { node ->
+            node.shardManager.shardScoreGroupDetails.forEachKeyValue { groupDescription, groupDetails ->
+                logger.trace("group score for node {}:{} - B:{} R:{} C:{}",
+                        node.backingNode.node().hostName,
+                        groupDescription,
+                        groupDetails.balanceScore,
+                        groupDetails.relativeScore,
+                        groupDetails.capacityScore)
+            }
+        }
     }
 
     private fun findBestNextMoveChain(modelCluster: ModelCluster) : MoveChain {
@@ -151,95 +205,130 @@ class HeuristicBalancer(    settings: Settings,
     }
 
     private fun isValidMove(moveAction: MoveAction): Boolean {
-        return deciders.canRebalance(moveAction.shard.backingShard, allocation).type() == Decision.Type.YES &&
-               deciders.canAllocate(moveAction.shard.backingShard, moveAction.destNode.backingNode, allocation).type() == Decision.Type.YES
+        return deciders.canRebalance(moveAction.shard, allocation).type() == Decision.Type.YES &&
+               deciders.canAllocate(moveAction.shard, moveAction.destNode, allocation).type() == Decision.Type.YES
     }
 
-    fun findGoodMoveChains(modelCluster: ModelCluster): List<MoveChain> {
+    private fun findGoodMoveChains(modelCluster: ModelCluster): ListIterable<MoveChain> {
         val searchWindowSize = balancerConfiguration.searchScaleFactor * balancerConfiguration.concurrentRebalanceSetting
         val bestNQueue = MinimumNQueue<MoveChain>(balancerConfiguration.bestNQueueSize, {it.score})
         val searchCounter = Counter()
-
+        val searchStopTime = System.nanoTime() + TimeUnit.SECONDS.toNanos(balancerConfiguration.searchTimeLimitSeconds)
+        
         while (searchCounter.count < searchWindowSize) {
-            try {
-                val hypotheticalCluster = ModelCluster(modelCluster)
-                val moveChain = createRandomMoveChain(
-                        hypotheticalCluster,
-                        balancerConfiguration.concurrentRebalanceSetting,
-                        balancerConfiguration.searchDepthSetting)
+            val hypotheticalCluster = ModelCluster(modelCluster)
+            val moveChain = createRandomMoveChain(
+                    hypotheticalCluster,
+                    balancerConfiguration.concurrentRebalanceSetting,
+                    balancerConfiguration.searchDepthSetting)
 
-                if (isValidChain(moveChain) && bestNQueue.tryAdd(moveChain)) {
-                    searchCounter.reset()
-                }
-            } catch (e : NoLegalMoveFound) { /* ignore */}
+            if (isGoodChain(moveChain) && bestNQueue.tryAdd(moveChain)) {
+                if (System.nanoTime() >= searchStopTime) { break }
+                searchCounter.reset()
+            }
             searchCounter.increment()
         }
 
-        return bestNQueue.asList().filter { calculateBestNodeUsageImprovementFromBase(it) >= balancerConfiguration.minimumNodeSizeChangeRate }
+        return bestNQueue.asList().let {
+            if (expungingMode) it
+            else it.collect { optimizeMoveChain(it, modelCluster) }
+                   .select { isGoodChain(it) && hasMinimumNodeUsageImprovementFromBase(it) } }
     }
 
-    private fun isValidChain(moveChain: MoveChain): Boolean = (moveChain.score < initalClusterScore && moveChain.risk <= maximumAllowedRisk)
 
-    private fun calculateBestNodeUsageImprovementFromBase(it: MoveChain) = baseModelCluster.findBestNodeUsageImprovement(ModelCluster(baseModelCluster).apply { applyMoveChain(it) })
+    private fun optimizeMoveChain(moveChain: MoveChain, modelCluster: ModelCluster): MoveChain {
+        return moveChain.moveBatches
+                .asLazy()
+                .flatCollect { it.moves }
+                .collect { newChainWithout(moveChain, it.shard.shardId(), modelCluster) }
+                .select { it.score < moveChain.score && it.risk <= moveChain.risk }
+                .firstOrNull()
+                ?.let { optimizeMoveChain(it, modelCluster) }
+                ?: moveChain
+    }
 
-    private fun createRandomMoveChain(modelCluster: ModelCluster, maxBatchSize: Int, searchDepth: Int): MoveChain {
+    private fun newChainWithout(moveChain: MoveChain, shardId: ShardId, modelCluster: ModelCluster): MoveChain {
+        val hypotheticalCluster = ModelCluster(modelCluster)
+        return moveChain.moveBatches
+                .collect { it.moves.reject { it.shard.shardId() == shardId } }
+                .collect { moves -> buildMoveActionBatch(moves, hypotheticalCluster.apply { applyMoveActions(moves, stabilize = false) }) }
+                .let { MoveChain.pruneMoveChain(it) }
+    }
+
+    private fun isGoodChain(moveChain: MoveChain): Boolean =
+            expungingMode ||
+            moveChain.score < initalClusterScore &&
+            moveChain.risk <= maximumAllowedRisk
+
+    private fun hasMinimumNodeUsageImprovementFromBase(moveChain: MoveChain): Boolean {
+        val updatedCluster = ModelCluster(baseModelCluster).apply { applyMoveChain(moveChain) }
+        val moves = moveChain.moveBatches.flatCollect { it.moves }
+        return LazyIterate
+                .zip(buildLazyShardGroupChangeIterator(moves, baseModelCluster),
+                     buildLazyShardGroupChangeIterator(moves, updatedCluster))
+                .collectDouble { it.one - it.two }
+                .anySatisfy { it >= balancerConfiguration.minimumNodeSizeChangeRate }
+    }
+
+    private fun buildLazyShardGroupChangeIterator(moves: ListIterable<MoveAction>, cluster: ModelCluster): LazyIterable<Double> {
+        return moves
+                .asLazy()
+                .flatCollect { move ->
+                    cluster.modelNodes
+                            .select { node ->
+                                node.backingNode.let { it == move.sourceNode || it == move.destNode } }
+                            .collect { node ->
+                                node.shardManager.shardScoreGroupDetails[move.shardScoreGroupDescriptions.first()] }
+                            .collect { abs(it.relativeScore) } }
+    }
+
+    private fun createRandomMoveChain(hypotheticalCluster: ModelCluster, maxBatchSize: Int, searchDepth: Int): MoveChain {
         val moveBatches : MutableList<MoveActionBatch> = Lists.mutable.empty()
 
         for (depth in 1..searchDepth) {
             val nextBatchSize = random.nextInt(maxBatchSize) + 1
-            val nextMoveBatch = createRandomMoveBatch(modelCluster, nextBatchSize)
-            if (nextMoveBatch.risk > maximumAllowedRisk) { break; }
+            val nextMoveBatch = createRandomMoveBatch(hypotheticalCluster, nextBatchSize)
+            if (nextMoveBatch.risk > maximumAllowedRisk) { break }
             moveBatches.add(nextMoveBatch)
         }
 
-        return MoveChain.buildOptimalMoveChain(moveBatches)
+        return MoveChain.pruneMoveChain(moveBatches)
     }
 
-    private fun createRandomMoveBatch(modelCluster: ModelCluster, size: Int) : MoveActionBatch {
-        val moves: MutableList<MoveAction> = Lists.mutable.empty()
+    private fun createRandomMoveBatch(hypotheticalCluster: ModelCluster, size: Int) : MoveActionBatch {
+        return buildMoveActionBatch(hypotheticalCluster.makeRandomMoves(size), hypotheticalCluster)
+    }
 
-        for (moveNumber in 1..size) {
-            val move = modelCluster.makeRandomMove(moves) ?: break
-            moves.add(move)
-        }
+    private fun buildMoveActionBatch(moves: ListIterable<MoveAction>, hypotheticalCluster: ModelCluster): MoveActionBatch {
+        val risk = hypotheticalCluster.calculateRisk()
+        hypotheticalCluster.stabilizeCluster()
 
-        val risk = modelCluster.calculateRisk()
-        modelCluster.stabilizeCluster()
-        val score = modelCluster.calculateBalanceScore()
-        val overhead = moves.map { Math.max(it.shard.size, balancerConfiguration.minimumShardMovementOverhead) }.sum()
+        val score = hypotheticalCluster.calculateBalanceScore()
+        val overhead = moves
+                .collect { Math.max(it.overhead, balancerConfiguration.minimumShardMovementOverhead) }
+                .sum()
 
         return MoveActionBatch(moves, overhead, risk, score)
     }
 
     private fun rebalancePreconditionsCheck() : Boolean {
-        if (routingNodes.count() < 2) {
-            logger.debug("not enough nodes to balance")
-            return false
+        when {
+            routingNodes.count() < 2 ->
+                logger.debug("not enough nodes to balance")
+            routingNodes.shards { it?.started() == false }.count() > 0 ->
+                logger.debug("found non-started or relocating shards, waiting for cluster to stabilize")
+            routingNodes.shardsWithState(ShardRoutingState.STARTED).isEmpty() ->
+                logger.debug("could not find any started shards to balance")
+            balancerConfiguration.concurrentRebalanceSetting == 0 ->
+                logger.debug("rebalance disabled")
+            initalClusterScore == 0.0 ->
+                // this condition can occur during restarts where the cluster services are not
+                // fully started yet and thus report "0" size for shards
+                logger.debug("cluster score is 0")
+            else -> return true
         }
-
-        if (routingNodes.shards { it?.started()?:false == false }.count() > 0) {
-            logger.debug("found non-started or relocating shards, waiting for cluster to stabilize")
-            return false
-        }
-
-        if (routingNodes.shardsWithState(ShardRoutingState.STARTED).isEmpty()) {
-            logger.debug("could not find any started shards to balance")
-            return false
-        }
-
-        if (balancerConfiguration.concurrentRebalanceSetting == 0) {
-            logger.debug("rebalance disabled")
-            return false
-        }
-
-        if (initalClusterScore == 0.0) {
-            // this condition can occur during restarts where the cluster services are not
-            // fully started yet and thus report "0" size for shards
-            logger.debug("cluster score is 0")
-            return false
-        }
-
-        return true
+        
+        return false
     }
 
     /**
@@ -253,7 +342,7 @@ class HeuristicBalancer(    settings: Settings,
 
         val unassignedShards = routingNodes.unassigned()
                                            .toList()
-                                           .sortedBy { shardSizeCalculator.estimateShardSize(it) }
+                                           .sortedBy { shardSizes[it.shardId()].estimatedSize }
                                            .reversed()
 
         val modelCluster = ModelCluster(baseModelCluster)
@@ -280,7 +369,7 @@ class HeuristicBalancer(    settings: Settings,
      */
     fun moveShards(): Boolean {
         val shardsThatMustMove = Lists.mutable.ofAll(routingNodes.shards { shouldMove(it!!) })
-                                              .sortThisByLong { shardSizeCalculator.estimateShardSize(it) }
+                                              .sortThisByLong { shardSizes[it.shardId()].estimatedSize }
                                               .reverseThis()
         val modelCluster = ModelCluster(baseModelCluster)
         var changed = false
@@ -300,32 +389,18 @@ class HeuristicBalancer(    settings: Settings,
 
     private fun shouldMove(shard: ShardRouting) = deciders.canRemain(shard, routingNodes.node(shard.currentNodeId()), allocation).type() == Decision.Type.NO
 
-    private fun tryMove(shard: ShardRouting, nodes: ListIterable<ModelNode>) : ModelNode? {
-        val shardSize = shardSizeCalculator.estimateShardSize(shard)
+    private fun tryMove(shard: ShardRouting, nodes: ListIterable<ModelNode>) : ModelNode? = nodes
+            .firstOrNull { allocationAllowedForShard(shard, it) && rebalanceAllowedForShard(shard) }
+            ?.apply { routingNodes.relocate(shard, this.backingNode.nodeId(), shardSizes[shard.shardId()].estimatedSize) }
 
-        for (node in nodes) {
-            if (deciders.canAllocate(shard, node.backingNode, allocation) == Decision.NO) { continue }
-            if (deciders.canRebalance(shard, allocation) == Decision.NO) { continue }
+    private fun tryAllocation(shard: ShardRouting, nodes: ListIterable<ModelNode>) : ModelNode? = nodes
+            .firstOrNull { allocationAllowedForShard(shard, it) }
+            ?.apply { routingNodes.initialize(shard, this.backingNode.nodeId(), shardSizes[shard.shardId()].estimatedSize) }
 
-            routingNodes.relocate(shard, node.backingNode.nodeId(), shardSize)
-            return node
-        }
+    private fun rebalanceAllowedForShard(shard: ShardRouting) =
+            deciders.canRebalance(shard, allocation) != Decision.NO
 
-        return null
-    }
-
-    private fun tryAllocation(shard: ShardRouting, nodes: ListIterable<ModelNode>) : ModelNode? {
-        val shardSize = shardSizeCalculator.estimateShardSize(shard)
-
-        for (node in nodes) {
-            val decision = deciders.canAllocate(shard, node.backingNode, allocation)
-            if (decision == Decision.NO) { continue }
-
-            routingNodes.initialize(shard, node.backingNode.nodeId(), shardSize)
-            return node
-        }
-
-        return null
-    }
+    private fun allocationAllowedForShard(shard: ShardRouting, it: ModelNode) =
+            deciders.canAllocate(shard, it.backingNode, allocation) != Decision.NO
 }
 

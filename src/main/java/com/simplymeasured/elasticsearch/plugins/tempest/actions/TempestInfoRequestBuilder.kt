@@ -33,5 +33,4 @@ class TempestInfoRequestBuilder(client: ElasticsearchClient, action: TempestInfo
         MasterNodeReadOperationRequestBuilder<TempestInfoRequest, TempestInfoResponse, TempestInfoRequestBuilder>(
                 client,
                 action,
-                TempestInfoRequest()) {
-}
+                TempestInfoRequest())

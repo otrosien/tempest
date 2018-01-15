@@ -47,9 +47,11 @@ class TempestShardsAllocatorITests {
             settingsBuilder.put("plugin.types", "com.simplymeasured.elasticsearch.plugins.tempest.TempestPlugin")
             settingsBuilder.put("cluster.routing.allocation.type", "tempest")
             settingsBuilder.put("cluster.routing.allocation.same_shard.host", false)
-            settingsBuilder.put("http.cors.enabled", true);
-            settingsBuilder.put("http.cors.allow-origin", "*");
-            settingsBuilder.putArray("discovery.zen.ping.unicast.hosts", "localhost:9301-9305");
+            settingsBuilder.put("http.cors.enabled", true)
+            settingsBuilder.put("http.cors.allow-origin", "*")
+            settingsBuilder.putArray("discovery.zen.ping.unicast.hosts", "localhost:9301-9305")
+            settingsBuilder.put("cluster.routing.allocation.disk.watermark.low", "95%")
+            settingsBuilder.put("cluster.routing.allocation.disk.watermark.high", "99%")
         }.build(ElasticsearchClusterRunner.newConfigs().numOfNode(5))
 
         runner.ensureGreen()

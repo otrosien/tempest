@@ -30,7 +30,7 @@
 
     <groupId>com.simplymeasured.elasticsearch.plugins</groupId>
     <artifactId>tempest</artifactId>
-    <version>2.1.0-ES${elasticsearch.version}</version>
+    <version>2.2.0-ES${elasticsearch.version}-SNAPSHOT</version>
 
     <licenses>
         <license>
@@ -40,7 +40,7 @@
     </licenses>
 
     <properties>
-        <kotlin.version>1.0.1-2</kotlin.version>
+        <kotlin.version>1.2.10</kotlin.version>
         <elasticsearch.version>2.3.2</elasticsearch.version>
     </properties>
 
@@ -48,7 +48,7 @@
         <dependency>
             <groupId>org.eclipse.collections</groupId>
             <artifactId>eclipse-collections</artifactId>
-            <version>7.0.2</version>
+            <version>9.0.0</version>
         </dependency>
         <dependency>
             <groupId>org.jetbrains.kotlin</groupId>
