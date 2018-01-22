@@ -30,7 +30,7 @@
 
     <groupId>com.simplymeasured.elasticsearch.plugins</groupId>
     <artifactId>tempest</artifactId>
-    <version>2.2.0-ES${elasticsearch.version}-SNAPSHOT</version>
+    <version>2.2.0-ES${elasticsearch.version}</version>
 
     <licenses>
         <license>
