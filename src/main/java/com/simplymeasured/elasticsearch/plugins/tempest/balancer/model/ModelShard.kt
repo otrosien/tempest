@@ -1,6 +1,6 @@
 /*
  * The MIT License (MIT)
- * Copyright (c) 2016 DataRank, Inc.
+ * Copyright (c) 2018 DataRank, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -22,8 +22,27 @@
  *
  */
 
-package com.simplymeasured.elasticsearch.plugins.tempest.balancer
+package com.simplymeasured.elasticsearch.plugins.tempest.balancer.model
 
-class NoLegalMoveFound : RuntimeException() {
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.IndexSizingGroup
+import org.eclipse.collections.api.list.ListIterable
+import org.elasticsearch.cluster.routing.ShardRouting
+import org.elasticsearch.cluster.routing.ShardRoutingState
 
+/**
+ * Model representation of a shard
+ */
+data class ModelShard(
+        var state: ShardRoutingState, // only set through a shard manager
+        val shardSizeInfo: IndexSizingGroup.ShardSizeInfo,
+        val scoreGroupDescriptions: ListIterable<ShardScoreGroupDescription>,
+        val backingShard: ShardRouting) {
+    constructor(
+            shardRouting: ShardRouting,
+            shardSizeInfo: IndexSizingGroup.ShardSizeInfo,
+            scoreGroupDescriptions: ListIterable<ShardScoreGroupDescription>)
+            : this(shardRouting.state(),
+                   shardSizeInfo,
+                   scoreGroupDescriptions,
+                   shardRouting)
 }

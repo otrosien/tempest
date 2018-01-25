@@ -28,29 +28,18 @@ import com.simplymeasured.elasticsearch.plugins.tempest.actions.TempestInfoActio
 import com.simplymeasured.elasticsearch.plugins.tempest.actions.TempestInfoRequest
 import com.simplymeasured.elasticsearch.plugins.tempest.actions.TempestInfoResponse
 import com.simplymeasured.elasticsearch.plugins.tempest.actions.TransportTempestInfoAction
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.HeuristicBalancer
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.TempestConstants.*
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.TempestConstants.Companion.EXPUNGE_BLACKLISTED_NODES
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.TempestConstants.Companion.FORCE_REBALANCE_THRESHOLD_MINUTES
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.TempestConstants.Companion.MAXIMUM_ALLOWED_RISK_RATE
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.TempestConstants.Companion.MINIMUM_NODE_SIZE_CHANGE_RATE
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.TempestConstants.Companion.MINIMUM_SHARD_MOVEMENT_OVERHEAD
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.TempestConstants.Companion.SEARCH_DEPTH
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.TempestConstants.Companion.SEARCH_QUEUE_SIZE
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.TempestConstants.Companion.SEARCH_SCALE_FACTOR
-import org.eclipse.collections.api.list.MutableList
-import org.eclipse.collections.impl.factory.Lists
+import com.simplymeasured.elasticsearch.plugins.tempest.TempestConstants.Companion.EXPUNGE_BLACKLISTED_NODES
+import com.simplymeasured.elasticsearch.plugins.tempest.TempestConstants.Companion.FORCE_REBALANCE_THRESHOLD_MINUTES
+import com.simplymeasured.elasticsearch.plugins.tempest.TempestConstants.Companion.MAXIMUM_ALLOWED_RISK_RATE
+import com.simplymeasured.elasticsearch.plugins.tempest.TempestConstants.Companion.MAXIMUM_SEARCH_TIME_SECONDS
+import com.simplymeasured.elasticsearch.plugins.tempest.TempestConstants.Companion.MINIMUM_NODE_SIZE_CHANGE_RATE
+import com.simplymeasured.elasticsearch.plugins.tempest.TempestConstants.Companion.MINIMUM_SHARD_MOVEMENT_OVERHEAD
+import com.simplymeasured.elasticsearch.plugins.tempest.TempestConstants.Companion.SEARCH_DEPTH
+import com.simplymeasured.elasticsearch.plugins.tempest.TempestConstants.Companion.SEARCH_QUEUE_SIZE
+import com.simplymeasured.elasticsearch.plugins.tempest.TempestConstants.Companion.SEARCH_SCALE_FACTOR
 import org.elasticsearch.action.ActionModule
-import org.elasticsearch.action.admin.cluster.health.ClusterHealthAction
-import org.elasticsearch.action.admin.cluster.health.ClusterHealthRequest
-import org.elasticsearch.action.admin.cluster.health.ClusterHealthResponse
-import org.elasticsearch.action.admin.cluster.health.TransportClusterHealthAction
 import org.elasticsearch.cluster.ClusterModule
-import org.elasticsearch.cluster.ClusterState.registerPrototype
-import org.elasticsearch.cluster.SnapshotsInProgress
 import org.elasticsearch.cluster.settings.Validator
-import org.elasticsearch.common.component.LifecycleComponent
-import org.elasticsearch.common.inject.Module
 import org.elasticsearch.plugins.Plugin
 
 /**
@@ -74,6 +63,7 @@ class TempestPlugin : Plugin() {
         clusterModule.registerClusterDynamicSetting(FORCE_REBALANCE_THRESHOLD_MINUTES, Validator.INTEGER)
         clusterModule.registerClusterDynamicSetting(MINIMUM_NODE_SIZE_CHANGE_RATE, Validator.DOUBLE)
         clusterModule.registerClusterDynamicSetting(EXPUNGE_BLACKLISTED_NODES, Validator.BOOLEAN)
+        clusterModule.registerClusterDynamicSetting(MAXIMUM_SEARCH_TIME_SECONDS, Validator.INTEGER)
     }
 
     fun onModule(actionModule: ActionModule) {

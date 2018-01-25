@@ -25,7 +25,7 @@
 package com.simplymeasured.elasticsearch.plugins.tempest.actions
 
 import com.simplymeasured.elasticsearch.plugins.tempest.TempestShardsAllocator
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.ModelCluster
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.IndexGroupPartitioner
 import com.simplymeasured.elasticsearch.plugins.tempest.balancer.ShardSizeCalculator
 import org.elasticsearch.action.ActionListener
 import org.elasticsearch.action.support.ActionFilters
@@ -50,6 +50,8 @@ class TransportTempestInfoAction
                         clusterService: ClusterService,
                         val clusterInfoService: ClusterInfoService,
                         val tempestAllocator: TempestShardsAllocator,
+                        val indexGroupPartitioner: IndexGroupPartitioner,
+                        val shardSizeCalculator: ShardSizeCalculator,
                         threadPool: ThreadPool,
                         actionFilters: ActionFilters,
                         indexNameExpressionResolver: IndexNameExpressionResolver):
@@ -71,18 +73,14 @@ class TransportTempestInfoAction
 
     override fun masterOperation(request: TempestInfoRequest, state: ClusterState, listener: ActionListener<TempestInfoResponse>) {
         val response = TempestInfoResponse()
-        val shardSizeCalculator = ShardSizeCalculator(
-                settings,
-                state.routingNodes.metaData,
-                clusterInfoService.clusterInfo,
-                state.routingTable)
 
-        response.patternMapping = shardSizeCalculator.patternMapping()
-        response.youngIndexes = shardSizeCalculator.youngIndexes()
+        response.patternMapping = indexGroupPartitioner.patternMapping(state.routingNodes.metaData())
+        response.youngIndexes = shardSizeCalculator.youngIndexes(state.routingNodes.metaData())
         response.lastBalanceChangeDateTime = tempestAllocator.lastBalanceChangeDateTime
         response.lastOptimalBalanceFoundDateTime = tempestAllocator.lastOptimalBalanceFoundDateTime
         response.lastRebalanceAttemptDateTime = tempestAllocator.lastRebalanceAttemptDateTime
         response.status = tempestAllocator.status
+        response.lastNodeGroupScores = tempestAllocator.lastNodeGroupScores
         listener.onResponse(response)
     }
 

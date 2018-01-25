@@ -1,6 +1,6 @@
 /*
  * The MIT License (MIT)
- * Copyright (c) 2017 DataRank, Inc.
+ * Copyright (c) 2018 DataRank, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -22,17 +22,14 @@
  *
  */
 
-package com.simplymeasured.elasticsearch.plugins.tempest.balancer
+package com.simplymeasured.elasticsearch.plugins.tempest.balancer.model
 
-class TempestConstants {
-    companion object {
-        val SEARCH_DEPTH = "tempest.balancer.searchDepth"
-        val SEARCH_SCALE_FACTOR = "tempest.balancer.searchScaleFactor"
-        val SEARCH_QUEUE_SIZE = "tempest.balancer.searchQueueSize"
-        val MINIMUM_SHARD_MOVEMENT_OVERHEAD = "tempest.balancer.minimumShardMovementOverhead"
-        val MAXIMUM_ALLOWED_RISK_RATE = "tempest.balancer.maximumAllowedRiskRate"
-        val FORCE_REBALANCE_THRESHOLD_MINUTES = "tempest.balancer.forceRebalanceThresholdMinutes"
-        val MINIMUM_NODE_SIZE_CHANGE_RATE = "tempest.balancer.minimumNodeSizeChangeRate"
-        val EXPUNGE_BLACKLISTED_NODES = "tempest.balancer.expungeBlacklistedNodes"
-    }
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.MoveAction
+
+/**
+ * Interface that defines a very simple decider to be during move simulations
+ */
+interface MockDecider {
+    fun canMove(shard: ModelShard, destNode: ModelNode, moves: Collection<MoveAction>): Boolean
+    fun canAllocate(shard: ModelShard, destNode: ModelNode): Boolean
 }

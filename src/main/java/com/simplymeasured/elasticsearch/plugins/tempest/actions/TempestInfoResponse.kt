@@ -24,11 +24,11 @@
 
 package com.simplymeasured.elasticsearch.plugins.tempest.actions
 
-import com.simplymeasured.elasticsearch.plugins.tempest.actions.TempestInfoResponse.Companion.CURRENT_MODEL_VERSION
 import org.eclipse.collections.api.RichIterable
 import org.eclipse.collections.api.map.MapIterable
-import org.eclipse.collections.api.set.SetIterable
+import org.eclipse.collections.api.multimap.Multimap
 import org.eclipse.collections.impl.factory.Maps
+import org.eclipse.collections.impl.factory.Multimaps
 import org.eclipse.collections.impl.factory.Sets
 import org.eclipse.collections.impl.list.fixed.ArrayAdapter
 import org.elasticsearch.action.ActionResponse
@@ -44,7 +44,7 @@ import org.joda.time.DateTime
 
 class TempestInfoResponse: ActionResponse(), StatusToXContent {
     companion object {
-        val CURRENT_MODEL_VERSION = 1
+        val CURRENT_MODEL_VERSION = 2
     }
 
     // ideally this should be a data class I think but Kotlin is requiring constructor parameters for that and the
@@ -52,11 +52,13 @@ class TempestInfoResponse: ActionResponse(), StatusToXContent {
     var lastOptimalBalanceFoundDateTime: DateTime = DateTime(0)
     var lastBalanceChangeDateTime: DateTime = DateTime(0)
     var lastRebalanceAttemptDateTime: DateTime = DateTime(0)
-    var youngIndexes: SetIterable<String> = Sets.mutable.empty<String>()
-    var patternMapping: MapIterable<String, RichIterable<String>> = Maps.mutable.empty()
+    var lastNodeGroupScores: MapIterable<String, MapIterable<String, Double>> = Maps.immutable.empty()
+    var youngIndexes: RichIterable<String> = Sets.mutable.empty<String>()
+    var patternMapping: Multimap<String, String> = Multimaps.immutable.list.empty()
+
     var status: String = "unknown"
 
-    override fun readFrom(inputStream: org.elasticsearch.common.io.stream.StreamInput) {
+    override fun readFrom(inputStream: StreamInput) {
         inputStream.readByteArray()
                    .let { java.nio.ByteBuffer.wrap(it) }
                    .let(::ByteBufferStreamInput)
@@ -72,17 +74,41 @@ class TempestInfoResponse: ActionResponse(), StatusToXContent {
         this.youngIndexes = Sets.mutable.of(*inputStream.readStringArray())
         this.patternMapping = readPatternMapping(inputStream)
         this.status = inputStream.readString()
+        this.lastNodeGroupScores = readNodeGroupScores(inputStream)
     }
 
+    private fun readPatternMapping(inputStream: StreamInput): Multimap<String, String> =
+            Multimaps.mutable.list.empty<String, String>().apply {
+                val numberOfItems = inputStream.readVInt()
 
-    private fun readPatternMapping(inputStream: StreamInput): MapIterable<String, RichIterable<String>> {
-        return Maps.mutable.empty<String, RichIterable<String>>().apply {
+                for (itemIndex in 1..numberOfItems) {
+                    val pattern = inputStream.readString()
+                    val mappings = inputStream.readStringArray()
+                    this.putAll(pattern, ArrayAdapter.adapt(*mappings))
+                }
+            }
+
+
+    private fun readNodeGroupScores(inputStream: StreamInput): MapIterable<String, MapIterable<String, Double>> {
+        return Maps.mutable.empty<String, MapIterable<String, Double>>().apply {
             val numberOfItems = inputStream.readVInt()
 
             for (itemIndex in 1..numberOfItems) {
-                val pattern = inputStream.readString()
-                val mappings = inputStream.readStringArray()
-                this.put(pattern, ArrayAdapter.adapt(*mappings))
+                val hostname = inputStream.readString()
+                val groups = readGroupScores(inputStream)
+                this.put(hostname, groups)
+            }
+        }
+    }
+
+    private fun readGroupScores(inputStream: StreamInput): MapIterable<String, Double> {
+        return Maps.mutable.empty<String, Double>().apply {
+            val numberOfItems = inputStream.readVInt()
+
+            for (itemIndex in 1..numberOfItems) {
+                val group = inputStream.readString()
+                val score = inputStream.readDouble()
+                this.put(group, score)
             }
         }
     }
@@ -102,14 +128,35 @@ class TempestInfoResponse: ActionResponse(), StatusToXContent {
         outputStream.writeStringArray(response.youngIndexes.toArray(emptyArray<String>()))
         writePatternMapping(outputStream, response.patternMapping)
         outputStream.writeString(response.status)
+        writeNodeGroupScores(outputStream, response.lastNodeGroupScores)
     }
 
-    private fun writePatternMapping(outputStream: StreamOutput, patternMapping: MapIterable<String, RichIterable<String>>) {
-        outputStream.writeVInt(patternMapping.size())
+    private fun writePatternMapping(outputStream: StreamOutput, patternMapping: Multimap<String, String>) {
+        outputStream.writeVInt(patternMapping.sizeDistinct())
 
-        patternMapping.forEachKeyValue { pattern, indexes ->
+        patternMapping.forEachKeyMultiValues { pattern, indexes ->
             outputStream.writeString(pattern)
-            outputStream.writeStringArray(indexes.toArray(emptyArray<String>()))
+            outputStream.writeStringArray((indexes as RichIterable<String>).toArray(emptyArray<String>()))
+        }
+    }
+
+    private fun writeNodeGroupScores(
+            outputStream: StreamOutput,
+            groupScores: MapIterable<String, MapIterable<String, Double>>) {
+        outputStream.writeVInt(groupScores.size())
+
+        groupScores.forEachKeyValue { host, groups ->
+            outputStream.writeString(host)
+            writeGroupScores(outputStream, groups)
+        }
+    }
+
+    private fun writeGroupScores(outputStream: StreamOutput, groups: MapIterable<String, Double>) {
+        outputStream.writeVInt(groups.size())
+
+        groups.forEachKeyValue { description, score ->
+            outputStream.writeString(description)
+            outputStream.writeDouble(score)
         }
     }
 
@@ -120,7 +167,8 @@ class TempestInfoResponse: ActionResponse(), StatusToXContent {
         builder.startArray("youngIndexes")
         youngIndexes.forEach { builder.value(it) }
         builder.endArray()
-        builder.field("patternMap", patternMapping as Map<*, *>)
+        builder.field("patternMap", patternMapping.toMap() as Map<*, *>)
+        builder.field("nodeGroupScores", lastNodeGroupScores as Map<*, *>)
         builder.field("status", status)
         return builder
     }

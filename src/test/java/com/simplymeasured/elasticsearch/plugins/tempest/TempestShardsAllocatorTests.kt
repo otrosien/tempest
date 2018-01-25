@@ -24,45 +24,43 @@
 
 package com.simplymeasured.elasticsearch.plugins.tempest
 
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.MockDecider
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.ModelCluster
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.ShardSizeCalculator
+import com.carrotsearch.randomizedtesting.RandomizedContext
+import com.carrotsearch.randomizedtesting.annotations.TimeoutSuite
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.*
+import org.apache.lucene.util.LuceneTestCase
 import org.eclipse.collections.api.map.MutableMap
-import org.eclipse.collections.impl.factory.Lists
 import org.eclipse.collections.impl.factory.Maps
 import org.elasticsearch.Version
+import org.elasticsearch.action.admin.cluster.node.stats.TransportNodesStatsAction
 import org.elasticsearch.cluster.*
 import org.elasticsearch.cluster.metadata.IndexMetaData
 import org.elasticsearch.cluster.metadata.MetaData
 import org.elasticsearch.cluster.node.DiscoveryNodes
-import org.elasticsearch.cluster.routing.RoutingNodes
 import org.elasticsearch.cluster.routing.RoutingTable
 import org.elasticsearch.cluster.routing.ShardRouting
 import org.elasticsearch.cluster.routing.ShardRoutingState
 import org.elasticsearch.cluster.routing.allocation.AllocationService
 import org.elasticsearch.cluster.routing.allocation.allocator.ShardsAllocators
-import org.elasticsearch.cluster.routing.allocation.decider.ClusterRebalanceAllocationDecider
 import org.elasticsearch.common.settings.Settings
 import org.elasticsearch.index.shard.ShardId
 import org.elasticsearch.node.settings.NodeSettingsService
 import org.elasticsearch.test.ESAllocationTestCase
-import org.elasticsearch.test.ESIntegTestCase
 import org.elasticsearch.test.ESTestCase
 import org.elasticsearch.test.gateway.NoopGatewayAllocator
 import org.joda.time.DateTime
+import org.junit.Assert
 import org.junit.Before
 import org.junit.Test
-import org.mockito.Matchers.eq
-import org.mockito.Mock
 import org.mockito.Mockito
-import org.mockito.Mockito.any
 import org.mockito.Mockito.mock
 import java.security.AccessController
 import java.security.PrivilegedAction
+import java.util.*
 
 /**
  * Created by awhite on 5/1/16.
  */
+@TimeoutSuite(millis = 30 * 60 * 1000)
 class TempestShardsAllocatorTests : ESAllocationTestCase() {
 
     @Before
@@ -72,6 +70,9 @@ class TempestShardsAllocatorTests : ESAllocationTestCase() {
 
     @Test
     fun testBasicBalance() {
+        // can be reproduced with -Dtests.seed=<seed-id>
+        println("seed = ${RandomizedContext.current().runnerSeedAsString}")
+
         val settings = Settings.settingsBuilder()
                 .put("cluster.routing.allocation.node_concurrent_recoveries", 10)
                 .put("cluster.routing.allocation.node_initial_primaries_recoveries", 10)
@@ -83,9 +84,18 @@ class TempestShardsAllocatorTests : ESAllocationTestCase() {
         val mockClusterService = mock(ClusterService::class.java)
         val mockClusterInfoService = mock(ClusterInfoService::class.java)
         val mockNodeSettingsService = mock(NodeSettingsService::class.java)
+        val indexGroupPartitioner = IndexGroupPartitioner(settings)
+        val shardSizeCalculator = ShardSizeCalculator(settings, indexGroupPartitioner)
         Mockito.`when`(mockClusterInfoService.clusterInfo).thenReturn(testClusterInfo)
 
-        val tempestShardsAllocator = TempestShardsAllocator(settings, mockNodeSettingsService, mockClusterService, mockClusterInfoService)
+        val tempestShardsAllocator = TempestShardsAllocator(
+                settings = settings,
+                settingsService = mockNodeSettingsService,
+                clusterService = mockClusterService,
+                clusterInfoService = mockClusterInfoService,
+                indexGroupPartitioner = indexGroupPartitioner,
+                shardSizeCalculator = shardSizeCalculator)
+
         val strategy = MockAllocationService(
                 settings,
                 randomAllocationDeciders(settings, NodeSettingsService(Settings.Builder.EMPTY_SETTINGS), getRandom()),
@@ -93,57 +103,25 @@ class TempestShardsAllocatorTests : ESAllocationTestCase() {
                 mockClusterInfoService)
 
         var (routingTable, clusterState) = createCluster(strategy)
+        println(tempestShardsAllocator.lastClusterBalanceScore)
 
         routingTable.allShards().forEach { assertEquals(ShardRoutingState.STARTED, it.state()) }
         assignRandomShardSizes(routingTable, shardSizes)
-
-        val shardSizeCalculator = ShardSizeCalculator(settings, clusterState.metaData, mockClusterInfoService.clusterInfo, routingTable)
-        val modelClusterTracker = ModelClusterTracker()
-        var modelCluster = ModelCluster(
-                routingNodes = clusterState.routingNodes,
-                shardSizeCalculator = shardSizeCalculator,
-                mockDeciders = Lists.mutable.empty<MockDecider>(),
-                blacklistFilter = { false },
-                expungeBlacklistedNodes = false,
-                random = getRandom())
-        modelClusterTracker.add(modelCluster)
+        println(tempestShardsAllocator.lastClusterBalanceScore)
 
         routingTable = strategy.reroute(clusterState, "reroute").routingTable()
         clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build()
 
-
-        modelCluster = ModelCluster(
-                routingNodes = clusterState.routingNodes,
-                shardSizeCalculator = shardSizeCalculator,
-                mockDeciders = Lists.mutable.empty<MockDecider>(),
-                blacklistFilter = { false },
-                expungeBlacklistedNodes = false,
-                random = getRandom())
-
-        modelClusterTracker.add(modelCluster)
-        println("Score: " + modelCluster.calculateBalanceScore())
-
         while (clusterState.routingNodes.shardsWithState(ShardRoutingState.INITIALIZING).isEmpty().not()) {
             routingTable = strategy.applyStartedShards(clusterState, clusterState.routingNodes.shardsWithState(ShardRoutingState.INITIALIZING)).routingTable()
             clusterState = ClusterState.builder(clusterState).routingTable(routingTable).build()
-            modelCluster = ModelCluster(
-                    routingNodes = clusterState.routingNodes,
-                    shardSizeCalculator = shardSizeCalculator,
-                    mockDeciders = Lists.mutable.empty<MockDecider>(),
-                    blacklistFilter = { false },
-                    expungeBlacklistedNodes = false,
-                    random = getRandom())
-
-            modelClusterTracker.add(modelCluster)
-            println("Score: " + modelCluster.calculateBalanceScore())
+            println(tempestShardsAllocator.lastClusterBalanceScore)
         }
-
-        println(modelClusterTracker)
     }
 
     protected fun createCluster(strategy: MockAllocationService): Pair<RoutingTable, ClusterState> {
 
-        val indexes = (1..(5 + randomInt(10))).map { createRandomIndex(Integer.toHexString(it)) }
+        val indexes = (1..(5 + randomInt(5))).map { createRandomIndex(Integer.toHexString(it)) }
         val metaData = MetaData.builder().apply { indexes.forEach { this.put(it) } }.build()
         val routingTable = RoutingTable.builder().apply { indexes.forEach { this.addAsNew(metaData.index(it.index())) } }.build()
 
@@ -151,7 +129,7 @@ class TempestShardsAllocatorTests : ESAllocationTestCase() {
                 org.elasticsearch.cluster.ClusterName.DEFAULT)
                 .metaData(metaData)
                 .routingTable(routingTable)
-                .nodes(DiscoveryNodes.builder().apply { (1..(3 + randomInt(20))).forEach { this.put(newNode("node${it}")) } })
+                .nodes(DiscoveryNodes.builder().apply { (1..(3 + randomInt(100))).forEach { this.put(newNode("node${it}")) } })
                 .build()
 
         return startupCluster(routingTable, clusterState, strategy)
@@ -163,8 +141,8 @@ class TempestShardsAllocatorTests : ESAllocationTestCase() {
                 .settings(Settings.settingsBuilder()
                         .put(IndexMetaData.SETTING_VERSION_CREATED, Version.CURRENT)
                         .put(IndexMetaData.SETTING_CREATION_DATE, DateTime().millis))
-                .numberOfShards(3 + randomInt(20))
-                .numberOfReplicas(randomInt(2))
+                .numberOfShards(5 + randomInt(100))
+                .numberOfReplicas( randomInt(2))
     }
 
     fun startupCluster(routingTable: RoutingTable, clusterState: ClusterState, strategy: AllocationService) : Pair<RoutingTable, ClusterState> {

@@ -24,9 +24,17 @@
 
 package com.simplymeasured.elasticsearch.plugins.tempest.balancer
 
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.model.ShardScoreGroupDescription
+import org.eclipse.collections.api.list.ListIterable
+import org.elasticsearch.cluster.routing.RoutingNode
+import org.elasticsearch.cluster.routing.ShardRouting
+
 /**
  * Simulated Move that holds the source and destination model node and shard
  */
-data class MoveAction(val sourceNode: ModelNode, val shard: ModelShard, val destNode: ModelNode) {
-
-}
+data class MoveAction(
+        val sourceNode: RoutingNode,
+        val shard: ShardRouting,
+        val destNode: RoutingNode,
+        val overhead: Long,
+        val shardScoreGroupDescriptions: ListIterable<ShardScoreGroupDescription>)

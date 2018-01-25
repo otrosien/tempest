@@ -1,6 +1,6 @@
 /*
  * The MIT License (MIT)
- * Copyright (c) 2016 DataRank, Inc.
+ * Copyright (c) 2017 DataRank, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -24,29 +24,18 @@
 
 package com.simplymeasured.elasticsearch.plugins.tempest
 
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.ModelCluster
-import org.eclipse.collections.impl.factory.Lists
-
-/**
- * Created by awhite on 5/9/16.
- */
-class ModelClusterTracker {
-    val modelClusters = Lists.mutable.empty<ModelCluster>()
-
-    fun add(modelCluster: ModelCluster) {
-        modelClusters.add(modelCluster)
-    }
-
-    override fun toString(): String {
-        val stringBuilder = StringBuilder()
-        modelClusters.forEachIndexed { index, modelCluster ->
-            stringBuilder
-                    .append(index)
-                    .append(",")
-                    .append(modelCluster.modelNodes.map { it.calculateUsage() }.joinToString())
-                    .append("\n")
-        }
-
-        return stringBuilder.toString()
+class TempestConstants {
+    companion object {
+        val SEARCH_DEPTH = "tempest.balancer.searchDepth"
+        val SEARCH_SCALE_FACTOR = "tempest.balancer.searchScaleFactor"
+        val SEARCH_QUEUE_SIZE = "tempest.balancer.searchQueueSize"
+        val MINIMUM_SHARD_MOVEMENT_OVERHEAD = "tempest.balancer.minimumShardMovementOverhead"
+        val MAXIMUM_ALLOWED_RISK_RATE = "tempest.balancer.maximumAllowedRiskRate"
+        val FORCE_REBALANCE_THRESHOLD_MINUTES = "tempest.balancer.forceRebalanceThresholdMinutes"
+        val MINIMUM_NODE_SIZE_CHANGE_RATE = "tempest.balancer.minimumNodeSizeChangeRate"
+        val EXPUNGE_BLACKLISTED_NODES = "tempest.balancer.expungeBlacklistedNodes"
+        val MAXIMUM_SEARCH_TIME_SECONDS = "tempest.balancer.maxSearchTimeSeconds"
+        val GROUPING_PATTERNS = "tempest.balancer.groupingPatterns"
+        val MODEL_AGE_MINUTES = "tempest.balancer.modelAgeMinutes"
     }
 }

@@ -1,6 +1,6 @@
 /*
  * The MIT License (MIT)
- * Copyright (c) 2016 DataRank, Inc.
+ * Copyright (c) 2018 DataRank, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -22,12 +22,12 @@
  *
  */
 
-package com.simplymeasured.elasticsearch.plugins.tempest.balancer
+package com.simplymeasured.elasticsearch.plugins.tempest.balancer.model
 
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.MoveAction
 import org.elasticsearch.cluster.node.DiscoveryNodeFilters
 import org.elasticsearch.cluster.node.DiscoveryNodeFilters.OpType.AND
 import org.elasticsearch.cluster.node.DiscoveryNodeFilters.OpType.OR
-import org.elasticsearch.cluster.routing.allocation.decider.FilterAllocationDecider
 import org.elasticsearch.cluster.routing.allocation.decider.FilterAllocationDecider.*
 import org.elasticsearch.common.settings.Settings
 
@@ -42,10 +42,12 @@ class MockFilterAllocationDecider(settings: Settings) : MockDecider {
     private val clusterExcludeFilters: DiscoveryNodeFilters? = settings.getByPrefix(CLUSTER_ROUTING_EXCLUDE_GROUP).getAsMap().let { if (it.isEmpty()) null else DiscoveryNodeFilters.buildFromKeyValue(OR, it) }
 
     override fun canAllocate(shard: ModelShard, destNode: ModelNode): Boolean {
-        if (clusterExcludeFilters?.match(destNode.backingNode.node())   ?: false) { return false }
-        if (!(clusterIncludeFilters?.match(destNode.backingNode.node()) ?: true)) { return false }
-        if (!(clusterRequireFilters?.match(destNode.backingNode.node()) ?: true)) { return false }
-        return true
+        when {
+            clusterExcludeFilters?.match(destNode.backingNode.node()) == true -> return false
+            clusterIncludeFilters?.match(destNode.backingNode.node()) == false -> return false
+            clusterRequireFilters?.match(destNode.backingNode.node()) == false -> return false
+            else -> return true
+        }
     }
 
     override fun canMove(shard: ModelShard, destNode: ModelNode, moves: Collection<MoveAction>): Boolean {

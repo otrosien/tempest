@@ -24,7 +24,9 @@
 
 package com.simplymeasured.elasticsearch.plugins.tempest.balancer
 
+import org.eclipse.collections.api.list.ListIterable
 import org.eclipse.collections.impl.factory.SortedSets
+import org.eclipse.collections.impl.list.mutable.ListAdapter
 import org.eclipse.collections.impl.set.sorted.mutable.TreeSortedSet
 import java.util.*
 import kotlin.comparisons.compareBy
@@ -32,10 +34,11 @@ import kotlin.comparisons.compareBy
 /**
  * Generic queue that tracks the top N items
  */
-class MinimumNQueue<T>(val size: Int, val comparator: Comparator<T>) {
+class MinimumNQueue<T>(private val size: Int,
+                       private val comparator: Comparator<T>) {
     constructor(size: Int, selector: (T) -> Comparable<*>) : this(size, compareBy(selector))
 
-    val orderedSet: SortedSet<T> = TreeSortedSet(comparator)
+    private val orderedSet: SortedSet<T> = TreeSortedSet(comparator)
 
     /**
      * Attempt to add an item to the queue
@@ -49,7 +52,7 @@ class MinimumNQueue<T>(val size: Int, val comparator: Comparator<T>) {
 
         if (orderedSet.size < size) {
             orderedSet.add(item)
-            return true;
+            return true
         }
 
         val worstValue = orderedSet.last()
@@ -61,5 +64,5 @@ class MinimumNQueue<T>(val size: Int, val comparator: Comparator<T>) {
         return true
     }
 
-    fun asList(): List<T> = orderedSet.toList()
+    fun asList(): ListIterable<T> = ListAdapter.adapt(orderedSet.toList())
 }

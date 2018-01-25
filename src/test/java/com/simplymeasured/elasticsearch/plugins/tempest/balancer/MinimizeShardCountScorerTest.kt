@@ -1,6 +1,6 @@
 /*
  * The MIT License (MIT)
- * Copyright (c) 2016 DataRank, Inc.
+ * Copyright (c) 2018 DataRank, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -24,10 +24,16 @@
 
 package com.simplymeasured.elasticsearch.plugins.tempest.balancer
 
-/**
- * Interface that defines a very simple decider to be during move simulations
- */
-interface MockDecider {
-    fun canMove(shard: ModelShard, destNode: ModelNode, moves: Collection<MoveAction>): Boolean
-    fun canAllocate(shard: ModelShard, destNode: ModelNode): Boolean
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.model.MinimizeShardCountScorer
+import org.eclipse.collections.impl.factory.primitive.LongLists
+import org.junit.Assert
+import org.junit.Test
+
+class MinimizeShardCountScorerTest {
+    @Test
+    fun testExpungingZeroShards() {
+        val result = MinimizeShardCountScorer(10000.0).calculateRelativeScore(LongLists.immutable.empty(), 0.0)
+        print(result)
+        Assert.assertFalse(result.isNaN())
+    }
 }

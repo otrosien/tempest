@@ -24,6 +24,7 @@
 
 package com.simplymeasured.elasticsearch.plugins.tempest
 
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.IndexGroupPartitioner
 import com.simplymeasured.elasticsearch.plugins.tempest.handlers.TempestInfoRestHandler
 import com.simplymeasured.elasticsearch.plugins.tempest.handlers.TempestRebalanceRestHandler
 import org.elasticsearch.cluster.ClusterModule
@@ -37,5 +38,6 @@ class TempestModule : AbstractModule() {
     override fun configure() {
         bind(TempestRebalanceRestHandler::class.java).asEagerSingleton()
         bind(TempestInfoRestHandler::class.java).asEagerSingleton()
+        bind(IndexGroupPartitioner::class.java).asEagerSingleton()
     }
 }

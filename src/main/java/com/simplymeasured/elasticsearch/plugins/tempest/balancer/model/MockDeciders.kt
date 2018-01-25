@@ -1,6 +1,6 @@
 /*
  * The MIT License (MIT)
- * Copyright (c) 2016 DataRank, Inc.
+ * Copyright (c) 2018 DataRank, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -22,11 +22,10 @@
  *
  */
 
-package com.simplymeasured.elasticsearch.plugins.tempest.balancer
+package com.simplymeasured.elasticsearch.plugins.tempest.balancer.model
 
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.MoveAction
 import org.elasticsearch.cluster.routing.ShardRoutingState
-import org.elasticsearch.cluster.routing.allocation.decider.AllocationDecider
-import org.elasticsearch.cluster.routing.allocation.decider.FilterAllocationDecider
 
 /**
  * A set of basic mock deciders
@@ -38,7 +37,7 @@ object MockDeciders {
      */
     val sameNodeDecider = object : MockDecider {
         override fun canAllocate(shard: ModelShard, destNode: ModelNode): Boolean {
-            return destNode.shards.none { it.index == shard.index && it.id == shard.id }
+            return destNode.shardManager.shards.none { it.backingShard.shardId() == shard.backingShard.shardId() }
         }
 
         override fun canMove(shard: ModelShard, destNode: ModelNode, moves: Collection<MoveAction>): Boolean {
@@ -69,7 +68,7 @@ object MockDeciders {
         override fun canAllocate(shard: ModelShard, destNode: ModelNode): Boolean = true
 
         override fun canMove(shard: ModelShard, destNode: ModelNode, moves: Collection<MoveAction>): Boolean {
-            return moves.none { it.shard.index == shard.index && it.shard.id == shard.id }
+            return moves.none { it.shard.shardId() == shard.backingShard.shardId() }
         }
     }
 
