@@ -96,19 +96,19 @@ class ShardScoreGroup(
 
             if (indexMetaData.totalNumberOfShards <= numberOfNodes) {
                 return Lists.immutable.of(ShardScoreGroup(
-                        ShardScoreGroupDescription(indexMetaData.index, includesPrimaries = true, includesReplicas = true),
+                        ShardScoreGroupDescription(indexMetaData.index.name, includesPrimaries = true, includesReplicas = true),
                         MinimizeShardCountScorer(totalShardSizes.toDouble() / indexMetaData.totalNumberOfShards)))
             }
 
             val primaryScoreGroup = ShardScoreGroup(
-                    ShardScoreGroupDescription(indexMetaData.index, includesPrimaries = true, includesReplicas = false),
+                    ShardScoreGroupDescription(indexMetaData.index.name, includesPrimaries = true, includesReplicas = false),
                     if (indexMetaData.numberOfShards <= numberOfNodes) MinimizeShardCountScorer(totalPrimarySize.toDouble() / indexMetaData.numberOfShards)
                     else AveragingShardSizeScorer(totalPrimarySize / totalCapacityUnits))
 
             if (totalReplicas == 0) { return Lists.immutable.of(primaryScoreGroup) }
             
             val replicaScoreGroup = ShardScoreGroup(
-                    ShardScoreGroupDescription(indexMetaData.index, includesPrimaries = false, includesReplicas = true),
+                    ShardScoreGroupDescription(indexMetaData.index.name, includesPrimaries = false, includesReplicas = true),
                     if (totalReplicas <= numberOfNodes) MinimizeShardCountScorer(totalReplicaSize.toDouble() / totalReplicas)
                     else AveragingShardSizeScorer(totalReplicaSize / totalCapacityUnits))
 

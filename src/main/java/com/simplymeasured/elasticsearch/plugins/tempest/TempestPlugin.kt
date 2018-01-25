@@ -25,49 +25,102 @@
 package com.simplymeasured.elasticsearch.plugins.tempest
 
 import com.simplymeasured.elasticsearch.plugins.tempest.actions.TempestInfoAction
-import com.simplymeasured.elasticsearch.plugins.tempest.actions.TempestInfoRequest
-import com.simplymeasured.elasticsearch.plugins.tempest.actions.TempestInfoResponse
 import com.simplymeasured.elasticsearch.plugins.tempest.actions.TransportTempestInfoAction
-import com.simplymeasured.elasticsearch.plugins.tempest.TempestConstants.Companion.EXPUNGE_BLACKLISTED_NODES
-import com.simplymeasured.elasticsearch.plugins.tempest.TempestConstants.Companion.FORCE_REBALANCE_THRESHOLD_MINUTES
-import com.simplymeasured.elasticsearch.plugins.tempest.TempestConstants.Companion.MAXIMUM_ALLOWED_RISK_RATE
-import com.simplymeasured.elasticsearch.plugins.tempest.TempestConstants.Companion.MAXIMUM_SEARCH_TIME_SECONDS
-import com.simplymeasured.elasticsearch.plugins.tempest.TempestConstants.Companion.MINIMUM_NODE_SIZE_CHANGE_RATE
-import com.simplymeasured.elasticsearch.plugins.tempest.TempestConstants.Companion.MINIMUM_SHARD_MOVEMENT_OVERHEAD
-import com.simplymeasured.elasticsearch.plugins.tempest.TempestConstants.Companion.SEARCH_DEPTH
-import com.simplymeasured.elasticsearch.plugins.tempest.TempestConstants.Companion.SEARCH_QUEUE_SIZE
-import com.simplymeasured.elasticsearch.plugins.tempest.TempestConstants.Companion.SEARCH_SCALE_FACTOR
-import org.elasticsearch.action.ActionModule
-import org.elasticsearch.cluster.ClusterModule
-import org.elasticsearch.cluster.settings.Validator
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.BalancerConfiguration
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.IndexGroupPartitioner
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.ShardSizeCalculator
+import com.simplymeasured.elasticsearch.plugins.tempest.handlers.TempestInfoRestHandler
+import com.simplymeasured.elasticsearch.plugins.tempest.handlers.TempestRebalanceRestHandler
+import org.eclipse.collections.impl.factory.Lists
+import org.eclipse.collections.impl.factory.Maps
+import org.elasticsearch.action.ActionRequest
+import org.elasticsearch.action.ActionResponse
+import org.elasticsearch.client.Client
+import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver
+import org.elasticsearch.cluster.node.DiscoveryNodes
+import org.elasticsearch.cluster.routing.allocation.allocator.ShardsAllocator
+import org.elasticsearch.cluster.service.ClusterService
+import org.elasticsearch.common.settings.*
+import org.elasticsearch.common.xcontent.NamedXContentRegistry
+import org.elasticsearch.plugins.ActionPlugin
+import org.elasticsearch.plugins.ClusterPlugin
 import org.elasticsearch.plugins.Plugin
+import org.elasticsearch.rest.RestController
+import org.elasticsearch.rest.RestHandler
+import org.elasticsearch.script.ScriptService
+import org.elasticsearch.threadpool.ThreadPool
+import org.elasticsearch.watcher.ResourceWatcherService
+import java.util.function.Supplier
 
 /**
  * Main configuration entry point for the Tempest Plugin Required for ES Integration
  */
 
-class TempestPlugin : Plugin() {
-    override fun name() = "tempest"
+class TempestPlugin(val settings: Settings) : Plugin(), ActionPlugin, ClusterPlugin {
+    private lateinit var balancerConfiguration: BalancerConfiguration
+    private lateinit var indexGroupPartitioner: IndexGroupPartitioner
+    private lateinit var shardSizeCalculator: ShardSizeCalculator
 
-    override fun description() = "shard balancer"
-
-    override fun nodeModules() = mutableListOf(TempestModule())
-
-    fun onModule(clusterModule: ClusterModule) {
-        clusterModule.registerShardsAllocator("tempest", TempestShardsAllocator::class.java)
-        clusterModule.registerClusterDynamicSetting(SEARCH_DEPTH, Validator.INTEGER)
-        clusterModule.registerClusterDynamicSetting(SEARCH_SCALE_FACTOR, Validator.INTEGER)
-        clusterModule.registerClusterDynamicSetting(SEARCH_QUEUE_SIZE, Validator.INTEGER)
-        clusterModule.registerClusterDynamicSetting(MINIMUM_SHARD_MOVEMENT_OVERHEAD, Validator.INTEGER)
-        clusterModule.registerClusterDynamicSetting(MAXIMUM_ALLOWED_RISK_RATE, Validator.DOUBLE)
-        clusterModule.registerClusterDynamicSetting(FORCE_REBALANCE_THRESHOLD_MINUTES, Validator.INTEGER)
-        clusterModule.registerClusterDynamicSetting(MINIMUM_NODE_SIZE_CHANGE_RATE, Validator.DOUBLE)
-        clusterModule.registerClusterDynamicSetting(EXPUNGE_BLACKLISTED_NODES, Validator.BOOLEAN)
-        clusterModule.registerClusterDynamicSetting(MAXIMUM_SEARCH_TIME_SECONDS, Validator.INTEGER)
+    override fun getSettings(): MutableList<Setting<*>> {
+        return Lists.mutable.of(
+                 BalancerConfiguration.CONCURRENT_REBALANCE_SETTING,
+                 BalancerConfiguration.EXCLUDE_GROUP_SETTING,
+                 BalancerConfiguration.SEARCH_DEPTH_SETTING,
+                 BalancerConfiguration.SEARCH_SCALE_FACTOR_SETTING,
+                 BalancerConfiguration.BEST_NQUEUE_SIZE_SETTING,
+                 BalancerConfiguration.MINIMUM_SHARD_MOVEMENT_OVERHEAD_SETTING,
+                 BalancerConfiguration.MAXIMUM_ALLOWED_RISK_RATE_SETTING,
+                 BalancerConfiguration.MINIMUM_NODE_SIZE_CHANGE_RATE_SETTING,
+                 BalancerConfiguration.EXPUNGE_BLACKLISTED_NODES_SETTING,
+                 BalancerConfiguration.SEARCH_TIME_LIMIT_SECONDS_SETTING,
+                 IndexGroupPartitioner.INDEX_GROUP_PATTERN_SETTING)
     }
 
-    fun onModule(actionModule: ActionModule) {
-        actionModule.registerAction<TempestInfoRequest, TempestInfoResponse>(TempestInfoAction.INSTANCE, TransportTempestInfoAction::class.java)
+    override fun createComponents(
+            client: Client,
+            clusterService: ClusterService,
+            threadPool: ThreadPool,
+            resourceWatcherService: ResourceWatcherService,
+            scriptService: ScriptService,
+            xContentRegistry: NamedXContentRegistry): MutableCollection<Any> {
+
+        balancerConfiguration = BalancerConfiguration(settings, clusterService.clusterSettings)
+        indexGroupPartitioner = IndexGroupPartitioner(settings, clusterService.clusterSettings)
+        shardSizeCalculator = ShardSizeCalculator(settings, clusterService.clusterSettings, indexGroupPartitioner)
+        return Lists.mutable.empty()
+    }
+
+    override fun getShardsAllocators(
+            settings: Settings,
+            clusterSettings: ClusterSettings): MutableMap<String, Supplier<ShardsAllocator>> {
+        return Maps.mutable.of("tempest", Supplier { buildTempestAllocator(settings) })
+    }
+
+    private fun buildTempestAllocator(settings: Settings): ShardsAllocator {
+        return TempestShardsAllocator(
+                settings,
+                balancerConfiguration,
+                indexGroupPartitioner,
+                shardSizeCalculator)
+    }
+
+    override fun getRestHandlers(
+            settings: Settings,
+            restController: RestController,
+            clusterSettings: ClusterSettings,
+            indexScopedSettings: IndexScopedSettings,
+            settingsFilter: SettingsFilter,
+            indexNameExpressionResolver: IndexNameExpressionResolver,
+            nodesInCluster: Supplier<DiscoveryNodes>): MutableList<RestHandler> {
+        return Lists.mutable.of(
+                TempestInfoRestHandler(settings, restController),
+                TempestRebalanceRestHandler(settings, restController))
+
+    }
+
+    override fun getActions(): MutableList<ActionPlugin.ActionHandler<out ActionRequest, out ActionResponse>> {
+        return Lists.mutable.of(
+            ActionPlugin.ActionHandler(TempestInfoAction.INSTANCE, TransportTempestInfoAction::class.java))
     }
 }
 

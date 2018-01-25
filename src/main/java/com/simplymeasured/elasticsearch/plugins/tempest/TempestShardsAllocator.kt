@@ -28,16 +28,15 @@ import com.simplymeasured.elasticsearch.plugins.tempest.balancer.*
 import com.simplymeasured.elasticsearch.plugins.tempest.balancer.model.ModelNode
 import org.eclipse.collections.api.map.MapIterable
 import org.eclipse.collections.impl.factory.Maps
-import org.elasticsearch.cluster.*
-import org.elasticsearch.cluster.routing.allocation.FailedRerouteAllocation
+import org.elasticsearch.cluster.routing.ShardRouting
 import org.elasticsearch.cluster.routing.allocation.RoutingAllocation
-import org.elasticsearch.cluster.routing.allocation.StartedRerouteAllocation
+import org.elasticsearch.cluster.routing.allocation.ShardAllocationDecision
 import org.elasticsearch.cluster.routing.allocation.allocator.ShardsAllocator
 import org.elasticsearch.common.component.AbstractComponent
 import org.elasticsearch.common.inject.Inject
 import org.elasticsearch.common.inject.Singleton
+import org.elasticsearch.common.settings.ClusterSettings
 import org.elasticsearch.common.settings.Settings
-import org.elasticsearch.node.settings.NodeSettingsService
 import org.joda.time.DateTime
 import java.util.*
 
@@ -48,15 +47,11 @@ import java.util.*
 @Singleton
 class TempestShardsAllocator
     @Inject constructor(settings: Settings,
-                        settingsService: NodeSettingsService,
-                        val clusterService: ClusterService,
-                        val clusterInfoService: ClusterInfoService,
+                        val balancerConfiguration: BalancerConfiguration,
                         val indexGroupPartitioner: IndexGroupPartitioner,
                         val shardSizeCalculator: ShardSizeCalculator) :
         AbstractComponent(settings), ShardsAllocator {
 
-    var balancerConfiguration: BalancerConfiguration = BalancerConfiguration(settings)
-    var effectiveSettings: Settings = settings
     var lastRebalanceAttemptDateTime: DateTime = DateTime(0)
     var lastBalanceChangeDateTime: DateTime = DateTime(0)
     var lastOptimalBalanceFoundDateTime: DateTime = DateTime(0)
@@ -65,67 +60,37 @@ class TempestShardsAllocator
     var status: String = "unknown"
     var random: Random = Random()
 
-    init {
-        updateComponentSettings(settings)
-        settingsService.addListener { newSettings ->
-            balancerConfiguration = BalancerConfiguration(newSettings, balancerConfiguration)
-            effectiveSettings = Settings.builder().put(effectiveSettings).put(newSettings).build()
-            updateComponentSettings(effectiveSettings)
-        }
-    }
-
-    private fun updateComponentSettings(newSettings: Settings) {
-        indexGroupPartitioner.indexGroupPatternSetting = newSettings.get(TempestConstants.GROUPING_PATTERNS, ".*")
-        shardSizeCalculator.modelAgeInMinutes = newSettings.getAsInt(TempestConstants.MODEL_AGE_MINUTES, 60 * 12)
-    }
-
-    override fun rebalance(allocation: RoutingAllocation): Boolean {
+    override fun allocate(allocation: RoutingAllocation) {
+        if (allocation.routingNodes().size() == 0) { return }
         lastRebalanceAttemptDateTime = DateTime()
 
-        return buildBalancer(allocation).run {
+        buildBalancer(allocation).run {
             updateScoreStats()
-            this.rebalance().apply {
-                if (this == true) {
-                    lastBalanceChangeDateTime = DateTime()
-                    status = "balancing"
-                } else {
-                    lastOptimalBalanceFoundDateTime = DateTime()
-                    status = "balanced"
-                }
+            status = when {
+                allocateUnassigned() -> "allocating"
+                moveShards() -> "moving"
+                rebalance() -> "balancing"
+                else -> "balanced"
             }
+
+        }
+
+        updateStatusTimestamps()
+    }
+
+    private fun updateStatusTimestamps() {
+        when (status) {
+            "balanced" -> lastOptimalBalanceFoundDateTime = DateTime()
+            else -> lastBalanceChangeDateTime = DateTime()
         }
     }
 
-    override fun allocateUnassigned(allocation: RoutingAllocation): Boolean {
-        return if (allocation.routingNodes().hasUnassignedShards()) {
-            buildBalancer(allocation).run {
-                updateScoreStats()
-                this.allocateUnassigned().apply {
-                    if (this == true) {
-                        status = "allocating"
-                    }
-                }
-            }
-        } else false
-    }
-
-    override fun applyFailedShards(allocation: FailedRerouteAllocation) {
-        /* ONLY FOR GATEWAYS */
-    }
-
-    override fun moveShards(allocation: RoutingAllocation): Boolean {
-        return buildBalancer(allocation).run {
-            updateScoreStats()
-            this.moveShards().apply {
-                if (this == true) {
-                    status = "moving"
-                }
-            }
-        }
+    override fun decideShardAllocation(shard: ShardRouting, allocation: RoutingAllocation): ShardAllocationDecision {
+       throw UnsupportedOperationException("Tempest does not support shard allocation explanations at this time")
     }
 
     private fun buildBalancer(allocation: RoutingAllocation): HeuristicBalancer = HeuristicBalancer(
-            settings = effectiveSettings,
+            settings = settings,
             allocation = allocation,
             shardSizeCalculator = shardSizeCalculator,
             balancerConfiguration = balancerConfiguration,
@@ -142,10 +107,6 @@ class TempestShardsAllocator
                 .keyValuesView()
                 .select { it.two.balanceScore != 0.0 || it.two.shards.notEmpty() }
                 .toMap( {"${it.one.index} ${if (it.one.includesPrimaries) "p" else ""}${if (it.one.includesReplicas) "r" else ""}"}, {it.two.balanceScore})
-    }
-
-    override fun applyStartedShards(allocation: StartedRerouteAllocation) {
-        /* ONLY FOR GATEWAYS */
     }
 }
 

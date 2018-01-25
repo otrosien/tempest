@@ -25,13 +25,13 @@
 package com.simplymeasured.elasticsearch.plugins.tempest
 
 import com.carrotsearch.randomizedtesting.RandomizedContext
+import com.carrotsearch.randomizedtesting.RandomizedTest.getRandom
+import com.carrotsearch.randomizedtesting.RandomizedTest.randomDouble
 import com.carrotsearch.randomizedtesting.annotations.TimeoutSuite
 import com.simplymeasured.elasticsearch.plugins.tempest.balancer.*
-import org.apache.lucene.util.LuceneTestCase
 import org.eclipse.collections.api.map.MutableMap
 import org.eclipse.collections.impl.factory.Maps
 import org.elasticsearch.Version
-import org.elasticsearch.action.admin.cluster.node.stats.TransportNodesStatsAction
 import org.elasticsearch.cluster.*
 import org.elasticsearch.cluster.metadata.IndexMetaData
 import org.elasticsearch.cluster.metadata.MetaData
@@ -40,22 +40,17 @@ import org.elasticsearch.cluster.routing.RoutingTable
 import org.elasticsearch.cluster.routing.ShardRouting
 import org.elasticsearch.cluster.routing.ShardRoutingState
 import org.elasticsearch.cluster.routing.allocation.AllocationService
-import org.elasticsearch.cluster.routing.allocation.allocator.ShardsAllocators
+import org.elasticsearch.cluster.service.ClusterService
 import org.elasticsearch.common.settings.Settings
 import org.elasticsearch.index.shard.ShardId
-import org.elasticsearch.node.settings.NodeSettingsService
-import org.elasticsearch.test.ESAllocationTestCase
-import org.elasticsearch.test.ESTestCase
 import org.elasticsearch.test.gateway.NoopGatewayAllocator
 import org.joda.time.DateTime
-import org.junit.Assert
 import org.junit.Before
 import org.junit.Test
 import org.mockito.Mockito
 import org.mockito.Mockito.mock
 import java.security.AccessController
 import java.security.PrivilegedAction
-import java.util.*
 
 /**
  * Created by awhite on 5/1/16.
@@ -90,9 +85,6 @@ class TempestShardsAllocatorTests : ESAllocationTestCase() {
 
         val tempestShardsAllocator = TempestShardsAllocator(
                 settings = settings,
-                settingsService = mockNodeSettingsService,
-                clusterService = mockClusterService,
-                clusterInfoService = mockClusterInfoService,
                 indexGroupPartitioner = indexGroupPartitioner,
                 shardSizeCalculator = shardSizeCalculator)
 

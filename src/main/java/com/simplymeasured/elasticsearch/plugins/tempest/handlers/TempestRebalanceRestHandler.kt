@@ -1,6 +1,7 @@
 package com.simplymeasured.elasticsearch.plugins.tempest.handlers
 
 import org.elasticsearch.client.Client
+import org.elasticsearch.client.node.NodeClient
 import org.elasticsearch.common.inject.Inject
 import org.elasticsearch.common.settings.Settings
 import org.elasticsearch.rest.*
@@ -10,16 +11,17 @@ import org.elasticsearch.rest.*
  */
 class TempestRebalanceRestHandler
 @Inject constructor(settings: Settings,
-                    restController: RestController,
-                    client: Client) :
-        BaseRestHandler(settings, restController, client) {
+                    restController: RestController) :
+        BaseRestHandler(settings) {
 
     init {
         restController.registerHandler(RestRequest.Method.POST, "/_tempest/rebalance", this)
     }
 
-    override fun handleRequest(request: RestRequest, channel: RestChannel, client: Client) {
+    override fun prepareRequest(request: RestRequest, client: NodeClient): RestChannelConsumer {
         client.admin().cluster().prepareReroute().execute()
-        channel.sendResponse(BytesRestResponse(RestStatus.OK))
+
+        return RestChannelConsumer { channel -> channel.sendResponse(BytesRestResponse(RestStatus.OK, "Submitted")) }
     }
+
 }

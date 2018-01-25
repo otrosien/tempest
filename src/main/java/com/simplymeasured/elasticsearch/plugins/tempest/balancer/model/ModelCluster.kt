@@ -130,7 +130,7 @@ class ModelCluster (
         // this method is not fast O(n) in terms of shard and node searching but is also used in non critical paths
         val localSourceNode = modelNodes.find { it.nodeId == moveAction.sourceNode.nodeId() }!!
         val localDestNode = modelNodes.find { it.nodeId == moveAction.destNode.nodeId() }!!
-        val localShard = localSourceNode.shards.find { it.backingShard.isSameShard(moveAction.shard) }!!
+        val localShard = localSourceNode.shards.find { it.backingShard.shardId() == moveAction.shard.shardId() }!!
 
         if (stabilize) {
             localSourceNode.shardManager.removeShard(localShard)
@@ -208,7 +208,7 @@ class ModelCluster (
     override fun toString(): String {
         return modelNodes
                 .flatMap { it.shardManager.shards }
-                .map { "${it.backingShard.currentNodeId()} ${it.backingShard.index} ${it.backingShard.id} ${it.state} (${it.shardSizeInfo.estimatedSize}/${it.shardSizeInfo.actualSize})" }
+                .map { "${it.backingShard.currentNodeId()} ${it.backingShard.index.name} ${it.backingShard.id} ${it.state} (${it.shardSizeInfo.estimatedSize}/${it.shardSizeInfo.actualSize})" }
                 .toList()
                 .sorted()
                 .joinToString("\n")

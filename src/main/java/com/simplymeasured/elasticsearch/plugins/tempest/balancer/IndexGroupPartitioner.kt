@@ -24,6 +24,7 @@
 
 package com.simplymeasured.elasticsearch.plugins.tempest.balancer
 
+import com.simplymeasured.elasticsearch.plugins.tempest.TempestConstants
 import org.eclipse.collections.api.RichIterable
 import org.eclipse.collections.api.list.ListIterable
 import org.eclipse.collections.api.map.MapIterable
@@ -37,6 +38,9 @@ import org.elasticsearch.cluster.metadata.MetaData
 import org.elasticsearch.common.component.AbstractComponent
 import org.elasticsearch.common.inject.Inject
 import org.elasticsearch.common.logging.Loggers
+import org.elasticsearch.common.settings.ClusterSettings
+import org.elasticsearch.common.settings.Setting
+import org.elasticsearch.common.settings.Setting.Property.*
 import org.elasticsearch.common.settings.Settings
 import java.util.regex.Pattern
 import java.util.regex.PatternSyntaxException
@@ -46,13 +50,17 @@ import javax.swing.UIManager.put
  * Partition indexes into groups based on a user defined regular expression
  */
 open class IndexGroupPartitioner
-@Inject constructor(settings: Settings) : AbstractComponent(settings) {
+@Inject constructor(
+        settings: Settings,
+        clusterSettings: ClusterSettings) : AbstractComponent(settings) {
 
-    private var indexPatterns: ListIterable<Pattern> = Lists.immutable.of(safeCompile(".*"))
+    companion object {
+        var INDEX_GROUP_PATTERN_SETTING: Setting<String> = Setting.simpleString(TempestConstants.GROUPING_PATTERNS, NodeScope, Dynamic)
+    }
 
     // commas aren't perfect here since they can legally be defined in regexes but it seems reasonable for now;
     // perhaps there is a more generic way to define groups
-    var indexGroupPatternSetting: String = ".*"
+    private var indexGroupPatternSettingValue: String = ".*"
         set (value) {
             field = value
             indexPatterns = field
@@ -62,6 +70,13 @@ open class IndexGroupPartitioner
                     .apply { this.add(safeCompile(".*")) }
                     .toImmutable()
         }
+
+    private var indexPatterns: ListIterable<Pattern> = Lists.immutable.of(safeCompile(".*"))
+
+    init {
+        clusterSettings.addSettingsUpdateConsumer(INDEX_GROUP_PATTERN_SETTING, this::indexGroupPatternSettingValue.setter)
+        indexGroupPatternSettingValue = INDEX_GROUP_PATTERN_SETTING.get(settings)
+    }
 
     private fun safeCompile(it: String): Pattern? {
         return try {
@@ -74,12 +89,12 @@ open class IndexGroupPartitioner
 
     fun partition(metadata: MetaData): RichIterable<RichIterable<IndexMetaData>> = FastList
             .newWithNValues(indexPatterns.size()) { Lists.mutable.empty<IndexMetaData>() }
-            .apply { metadata.forEach { this[determineGroupNumber(it.index)].add(it) } }
+            .apply { metadata.forEach { this[determineGroupNumber(it.index.name)].add(it) } }
             .let { it as RichIterable<RichIterable<IndexMetaData>> }
 
     fun patternMapping(metadata: MetaData) : Multimap<String, String> = LazyIterate
             .adapt(metadata)
-            .collect { it.index }
+            .collect { it.index.name }
             .groupBy { indexPatterns[determineGroupNumber(it)].toString() }
 
     private fun determineGroupNumber(indexName: String): Int {

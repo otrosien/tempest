@@ -36,12 +36,16 @@ import org.eclipse.collections.impl.Counter
 import org.eclipse.collections.impl.factory.Lists
 import org.eclipse.collections.impl.utility.LazyIterate
 import org.elasticsearch.cluster.metadata.MetaData
+import org.elasticsearch.cluster.node.DiscoveryNodeFilters
+import org.elasticsearch.cluster.node.DiscoveryNodeFilters.OpType.*
+import org.elasticsearch.cluster.routing.RoutingNode
 import org.elasticsearch.cluster.routing.RoutingNodes
 import org.elasticsearch.cluster.routing.ShardRouting
 import org.elasticsearch.cluster.routing.ShardRoutingState
 import org.elasticsearch.cluster.routing.allocation.RoutingAllocation
 import org.elasticsearch.cluster.routing.allocation.decider.AllocationDeciders
 import org.elasticsearch.cluster.routing.allocation.decider.Decision
+import org.elasticsearch.cluster.routing.allocation.decider.FilterAllocationDecider
 import org.elasticsearch.common.component.AbstractComponent
 import org.elasticsearch.common.settings.Settings
 import org.elasticsearch.index.shard.ShardId
@@ -56,8 +60,8 @@ import java.util.concurrent.TimeUnit
  */
 class HeuristicBalancer(    settings: Settings,
                             shardSizeCalculator: ShardSizeCalculator,
-                        val allocation: RoutingAllocation,
                         val balancerConfiguration: BalancerConfiguration,
+                        val allocation: RoutingAllocation,
                         val random: Random) : AbstractComponent(settings) {
 
     private val routingNodes: RoutingNodes = allocation.routingNodes()
@@ -66,10 +70,10 @@ class HeuristicBalancer(    settings: Settings,
             shardSizeCalculator.buildShardSizeInfo(allocation)
     val baseModelCluster = buildModelCluster(
             routingNodes = allocation.routingNodes(),
+            balancerConfiguration = balancerConfiguration,
             metaData = allocation.metaData(),
             shardSizes = shardSizes,
             settings = settings,
-            balancerConfiguration = balancerConfiguration,
             random = random)
     private val initalClusterScore: Double = baseModelCluster.calculateBalanceScore()
     private val expungingMode: Boolean = baseModelCluster.expungeableShardsExist()
@@ -92,7 +96,7 @@ class HeuristicBalancer(    settings: Settings,
                 random: Random): ModelCluster {
 
             val expungeBlacklistedNodes = balancerConfiguration.expungeBlacklistedNodes
-            val blacklistFilter = balancerConfiguration.clusterExcludeFilter
+            val blacklistFilter = buildBlacklistFilter(settings)
 
             val mockDeciders: ListIterable<MockDecider> =
                     Lists.mutable.of(
@@ -133,6 +137,15 @@ class HeuristicBalancer(    settings: Settings,
                     expungeBlacklistedNodes = expungeBlacklistedNodes,
                     random = random)
         }
+
+        private fun buildBlacklistFilter(settings: Settings): (RoutingNode) -> Boolean =
+                FilterAllocationDecider.CLUSTER_ROUTING_EXCLUDE_GROUP_SETTING.get(settings)
+                        .let { settings.getAsMap() }
+                        .let {
+                            if (it.isEmpty()) return {_ -> false}
+                            DiscoveryNodeFilters.buildFromKeyValue(OR, it)
+                                    ?.let { filter -> { routingNode: RoutingNode -> filter.match(routingNode.node()) } }
+                                    ?: return {_ -> false} }
     }
 
     /**
@@ -155,10 +168,11 @@ class HeuristicBalancer(    settings: Settings,
                     move.sourceNode.node().hostName,
                     move.destNode.node().hostName)
 
-            routingNodes.relocate(
+            routingNodes.relocateShard(
                     move.shard,
                     move.destNode.nodeId(),
-                    move.overhead)
+                    move.overhead,
+                    allocation.changes())
         }
 
         return true
@@ -210,17 +224,17 @@ class HeuristicBalancer(    settings: Settings,
     }
 
     private fun findGoodMoveChains(modelCluster: ModelCluster): ListIterable<MoveChain> {
-        val searchWindowSize = balancerConfiguration.searchScaleFactor * balancerConfiguration.concurrentRebalanceSetting
+        val searchWindowSize = balancerConfiguration.searchScaleFactor * balancerConfiguration.concurrentRebalance
         val bestNQueue = MinimumNQueue<MoveChain>(balancerConfiguration.bestNQueueSize, {it.score})
         val searchCounter = Counter()
-        val searchStopTime = System.nanoTime() + TimeUnit.SECONDS.toNanos(balancerConfiguration.searchTimeLimitSeconds)
+        val searchStopTime = System.nanoTime() + TimeUnit.SECONDS.toNanos(balancerConfiguration.searchTimeLimitSeconds.toLong())
         
         while (searchCounter.count < searchWindowSize) {
             val hypotheticalCluster = ModelCluster(modelCluster)
             val moveChain = createRandomMoveChain(
                     hypotheticalCluster,
-                    balancerConfiguration.concurrentRebalanceSetting,
-                    balancerConfiguration.searchDepthSetting)
+                    balancerConfiguration.concurrentRebalance,
+                    balancerConfiguration.searchDepth)
 
             if (isGoodChain(moveChain) && bestNQueue.tryAdd(moveChain)) {
                 if (System.nanoTime() >= searchStopTime) { break }
@@ -319,7 +333,7 @@ class HeuristicBalancer(    settings: Settings,
                 logger.debug("found non-started or relocating shards, waiting for cluster to stabilize")
             routingNodes.shardsWithState(ShardRoutingState.STARTED).isEmpty() ->
                 logger.debug("could not find any started shards to balance")
-            balancerConfiguration.concurrentRebalanceSetting == 0 ->
+            balancerConfiguration.concurrentRebalance == 0 ->
                 logger.debug("rebalance disabled")
             initalClusterScore == 0.0 ->
                 // this condition can occur during restarts where the cluster services are not
@@ -391,11 +405,20 @@ class HeuristicBalancer(    settings: Settings,
 
     private fun tryMove(shard: ShardRouting, nodes: ListIterable<ModelNode>) : ModelNode? = nodes
             .firstOrNull { allocationAllowedForShard(shard, it) && rebalanceAllowedForShard(shard) }
-            ?.apply { routingNodes.relocate(shard, this.backingNode.nodeId(), shardSizes[shard.shardId()].estimatedSize) }
+            ?.apply { routingNodes.relocateShard(
+                    shard,
+                    this.backingNode.nodeId(),
+                    shardSizes[shard.shardId()].estimatedSize,
+                    allocation.changes()) }
 
     private fun tryAllocation(shard: ShardRouting, nodes: ListIterable<ModelNode>) : ModelNode? = nodes
             .firstOrNull { allocationAllowedForShard(shard, it) }
-            ?.apply { routingNodes.initialize(shard, this.backingNode.nodeId(), shardSizes[shard.shardId()].estimatedSize) }
+            ?.apply { routingNodes.initializeShard(
+                    shard,
+                    backingNode.nodeId(),
+                    null, // I'm not exactly sure what this is for but it's always null in ES's codebase
+                    shardSizes[shard.shardId()].estimatedSize,
+                    allocation.changes()) }
 
     private fun rebalanceAllowedForShard(shard: ShardRouting) =
             deciders.canRebalance(shard, allocation) != Decision.NO
@@ -403,4 +426,3 @@ class HeuristicBalancer(    settings: Settings,
     private fun allocationAllowedForShard(shard: ShardRouting, it: ModelNode) =
             deciders.canAllocate(shard, it.backingNode, allocation) != Decision.NO
 }
-

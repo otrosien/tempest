@@ -27,58 +27,56 @@ package com.simplymeasured.elasticsearch.plugins.tempest.balancer
 import com.simplymeasured.elasticsearch.plugins.tempest.TempestConstants
 import org.elasticsearch.cluster.node.DiscoveryNodeFilters
 import org.elasticsearch.cluster.routing.RoutingNode
-import org.elasticsearch.cluster.routing.allocation.decider.ConcurrentRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_CLUSTER_CONCURRENT_REBALANCE
+import org.elasticsearch.cluster.routing.allocation.decider.ConcurrentRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_CLUSTER_CONCURRENT_REBALANCE_SETTING
 import org.elasticsearch.cluster.routing.allocation.decider.FilterAllocationDecider
+import org.elasticsearch.common.settings.ClusterSettings
+import org.elasticsearch.common.settings.Setting
+import org.elasticsearch.common.settings.Setting.*
+import org.elasticsearch.common.settings.Setting.Property.Dynamic
+import org.elasticsearch.common.settings.Setting.Property.NodeScope
 import org.elasticsearch.common.settings.Settings
 
 /**
- * Wrapper class for handling and providing defaults to relavent settings
+ * Wrapper class for handling and providing defaults to relevant settings
  */
-class BalancerConfiguration(val concurrentRebalanceSetting: Int,
-                            val searchDepthSetting: Int,
-                            val searchScaleFactor: Int,
-                            val bestNQueueSize: Int,
-                            val minimumShardMovementOverhead: Long,
-                            val maximumAllowedRiskRate: Double,
-                            val minimumNodeSizeChangeRate: Double,
-                            val expungeBlacklistedNodes: Boolean,
-                            val clusterExcludeFilter: (RoutingNode) -> Boolean,
-                            val searchTimeLimitSeconds: Long) {
+class BalancerConfiguration(
+        settings: Settings,
+        clusterSettings: ClusterSettings) {
 
-    constructor(settings: Settings) : this(
-            concurrentRebalanceSetting = settings.getAsInt(CLUSTER_ROUTING_ALLOCATION_CLUSTER_CONCURRENT_REBALANCE, 4)
-                                                 .let { if (it == -1) 4 else it },
-            searchDepthSetting = settings.getAsInt(TempestConstants.SEARCH_DEPTH, 5),
-            searchScaleFactor = settings.getAsInt(TempestConstants.SEARCH_SCALE_FACTOR, 1000),
-            bestNQueueSize = settings.getAsInt(TempestConstants.SEARCH_QUEUE_SIZE, 10),
-            minimumShardMovementOverhead = settings.getAsLong(TempestConstants.MINIMUM_SHARD_MOVEMENT_OVERHEAD, 100000000),
-            maximumAllowedRiskRate = settings.getAsDouble(TempestConstants.MAXIMUM_ALLOWED_RISK_RATE, 1.25),
-            minimumNodeSizeChangeRate = settings.getAsDouble(TempestConstants.MINIMUM_NODE_SIZE_CHANGE_RATE, 0.25),
-            expungeBlacklistedNodes = settings.getAsBoolean(TempestConstants.EXPUNGE_BLACKLISTED_NODES, false),
-            clusterExcludeFilter = buildBlacklistFilter(settings, { false }),
-            searchTimeLimitSeconds = settings.getAsLong(TempestConstants.MAXIMUM_SEARCH_TIME_SECONDS, 5))
+    var concurrentRebalance: Int = CONCURRENT_REBALANCE_SETTING.get(settings)
+    var excludeGroup: Settings = EXCLUDE_GROUP_SETTING.get(settings)
+    var searchDepth: Int = SEARCH_DEPTH_SETTING.get(settings)
+    var searchScaleFactor: Int = SEARCH_SCALE_FACTOR_SETTING.get(settings)
+    var bestNQueueSize: Int = BEST_NQUEUE_SIZE_SETTING.get(settings)
+    var minimumShardMovementOverhead: Long = MINIMUM_SHARD_MOVEMENT_OVERHEAD_SETTING.get(settings)
+    var maximumAllowedRiskRate: Double = MAXIMUM_ALLOWED_RISK_RATE_SETTING.get(settings)
+    var minimumNodeSizeChangeRate: Double = MINIMUM_NODE_SIZE_CHANGE_RATE_SETTING.get(settings)
+    var expungeBlacklistedNodes: Boolean = EXPUNGE_BLACKLISTED_NODES_SETTING.get(settings)
+    var searchTimeLimitSeconds: Int = SEARCH_TIME_LIMIT_SECONDS_SETTING.get(settings)
 
-    constructor(settings: Settings, other: BalancerConfiguration) : this(
-            concurrentRebalanceSetting = settings.getAsInt(CLUSTER_ROUTING_ALLOCATION_CLUSTER_CONCURRENT_REBALANCE, other.concurrentRebalanceSetting),
-            searchDepthSetting = settings.getAsInt(TempestConstants.SEARCH_DEPTH, other.searchDepthSetting),
-            searchScaleFactor = settings.getAsInt(TempestConstants.SEARCH_SCALE_FACTOR, other.searchScaleFactor),
-            bestNQueueSize = settings.getAsInt(TempestConstants.SEARCH_QUEUE_SIZE, 10),
-            minimumShardMovementOverhead = settings.getAsLong(TempestConstants.MINIMUM_SHARD_MOVEMENT_OVERHEAD, other.minimumShardMovementOverhead),
-            maximumAllowedRiskRate = settings.getAsDouble(TempestConstants.MAXIMUM_ALLOWED_RISK_RATE, other.maximumAllowedRiskRate),
-            minimumNodeSizeChangeRate = settings.getAsDouble(TempestConstants.MINIMUM_NODE_SIZE_CHANGE_RATE, other.minimumNodeSizeChangeRate),
-            expungeBlacklistedNodes = settings.getAsBoolean(TempestConstants.EXPUNGE_BLACKLISTED_NODES, other.expungeBlacklistedNodes),
-            clusterExcludeFilter = buildBlacklistFilter(settings, other.clusterExcludeFilter),
-            searchTimeLimitSeconds = settings.getAsLong(TempestConstants.MAXIMUM_SEARCH_TIME_SECONDS, other.searchTimeLimitSeconds))
+    init {
+        clusterSettings.addSettingsUpdateConsumer(CONCURRENT_REBALANCE_SETTING, this::concurrentRebalance.setter)
+        clusterSettings.addSettingsUpdateConsumer(EXCLUDE_GROUP_SETTING, this::excludeGroup.setter)
+        clusterSettings.addSettingsUpdateConsumer(SEARCH_DEPTH_SETTING, this::searchDepth.setter)
+        clusterSettings.addSettingsUpdateConsumer(SEARCH_SCALE_FACTOR_SETTING, this::searchScaleFactor.setter)
+        clusterSettings.addSettingsUpdateConsumer(BEST_NQUEUE_SIZE_SETTING, this::bestNQueueSize.setter)
+        clusterSettings.addSettingsUpdateConsumer(MINIMUM_SHARD_MOVEMENT_OVERHEAD_SETTING, this::minimumShardMovementOverhead.setter)
+        clusterSettings.addSettingsUpdateConsumer(MAXIMUM_ALLOWED_RISK_RATE_SETTING, this::maximumAllowedRiskRate.setter)
+        clusterSettings.addSettingsUpdateConsumer(MINIMUM_NODE_SIZE_CHANGE_RATE_SETTING, this::minimumNodeSizeChangeRate.setter)
+        clusterSettings.addSettingsUpdateConsumer(EXPUNGE_BLACKLISTED_NODES_SETTING, this::expungeBlacklistedNodes.setter)
+        clusterSettings.addSettingsUpdateConsumer(SEARCH_TIME_LIMIT_SECONDS_SETTING, this::searchTimeLimitSeconds.setter)
+    }
+
+    companion object {
+        val CONCURRENT_REBALANCE_SETTING: Setting<Int> = CLUSTER_ROUTING_ALLOCATION_CLUSTER_CONCURRENT_REBALANCE_SETTING
+        val EXCLUDE_GROUP_SETTING: Setting<Settings> = FilterAllocationDecider.CLUSTER_ROUTING_EXCLUDE_GROUP_SETTING
+        val SEARCH_DEPTH_SETTING: Setting<Int> = intSetting(TempestConstants.SEARCH_DEPTH, 5, 1, Dynamic, NodeScope)
+        val SEARCH_SCALE_FACTOR_SETTING: Setting<Int> = intSetting(TempestConstants.SEARCH_SCALE_FACTOR, 1000, 1, Dynamic, NodeScope)
+        val BEST_NQUEUE_SIZE_SETTING: Setting<Int> = intSetting(TempestConstants.SEARCH_QUEUE_SIZE, 10, 1, Dynamic, NodeScope)
+        val MINIMUM_SHARD_MOVEMENT_OVERHEAD_SETTING: Setting<Long> = longSetting(TempestConstants.MINIMUM_SHARD_MOVEMENT_OVERHEAD, 100000000, 0, Dynamic, NodeScope)
+        val MAXIMUM_ALLOWED_RISK_RATE_SETTING: Setting<Double> = doubleSetting(TempestConstants.MAXIMUM_ALLOWED_RISK_RATE, 1.25, 1.00, Dynamic, NodeScope)
+        val MINIMUM_NODE_SIZE_CHANGE_RATE_SETTING: Setting<Double> = doubleSetting(TempestConstants.MINIMUM_NODE_SIZE_CHANGE_RATE, 0.25, 0.00, Dynamic, NodeScope)
+        val EXPUNGE_BLACKLISTED_NODES_SETTING: Setting<Boolean> = boolSetting(TempestConstants.EXPUNGE_BLACKLISTED_NODES, false, Dynamic, NodeScope)
+        val SEARCH_TIME_LIMIT_SECONDS_SETTING: Setting<Int> = intSetting(TempestConstants.MAXIMUM_SEARCH_TIME_SECONDS, 5, 1, Dynamic, NodeScope)
+    }
 }
-
-private fun buildBlacklistFilter(settings: Settings, defaultFilter: (RoutingNode) -> Boolean): (RoutingNode) -> Boolean =
-        settings.getByPrefix(FilterAllocationDecider.CLUSTER_ROUTING_EXCLUDE_GROUP).getAsMap()
-                .let {
-                    if (it.isEmpty()) defaultFilter
-                    else DiscoveryNodeFilters
-                            .buildFromKeyValue(DiscoveryNodeFilters.OpType.OR, it)
-                            .let {
-                                return if (it == null) return { false }
-                                       else { routingNode: RoutingNode -> it.match(routingNode.node()) }
-                            }
-                }

@@ -28,12 +28,12 @@ import com.simplymeasured.elasticsearch.plugins.tempest.actions.TempestInfoActio
 import com.simplymeasured.elasticsearch.plugins.tempest.actions.TempestInfoRequest
 import com.simplymeasured.elasticsearch.plugins.tempest.actions.TempestInfoResponse
 import org.elasticsearch.client.Client
+import org.elasticsearch.client.node.NodeClient
 import org.elasticsearch.common.inject.Inject
 import org.elasticsearch.common.settings.Settings
 import org.elasticsearch.common.xcontent.XContentFactory
 import org.elasticsearch.rest.*
-import org.elasticsearch.rest.action.support.RestStatusToXContentListener
-import org.elasticsearch.rest.action.support.RestToXContentListener
+import org.elasticsearch.rest.action.RestStatusToXContentListener
 
 /**
  * Created by awhite on 2/5/17.
@@ -41,18 +41,18 @@ import org.elasticsearch.rest.action.support.RestToXContentListener
 
 class TempestInfoRestHandler
 @Inject constructor(settings: Settings,
-                    restController: RestController,
-                    client: Client) :
-        BaseRestHandler(settings, restController, client) {
+                    restController: RestController) :
+        BaseRestHandler(settings) {
 
     init {
         restController.registerHandler(RestRequest.Method.GET, "/_tempest", this)
     }
 
-    override fun handleRequest(request: RestRequest, channel: RestChannel, client: Client) {
-        client.execute(
+    override fun prepareRequest(request: RestRequest, client: NodeClient): RestChannelConsumer {
+        return RestChannelConsumer{ channel ->
+            client.execute(
                 TempestInfoAction(),
                 TempestInfoRequest(),
-                RestStatusToXContentListener<TempestInfoResponse>(channel))
+                RestStatusToXContentListener<TempestInfoResponse>(channel)) }
     }
 }

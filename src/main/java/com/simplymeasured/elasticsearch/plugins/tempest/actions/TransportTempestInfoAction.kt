@@ -31,10 +31,10 @@ import org.elasticsearch.action.ActionListener
 import org.elasticsearch.action.support.ActionFilters
 import org.elasticsearch.action.support.master.TransportMasterNodeReadAction
 import org.elasticsearch.cluster.ClusterInfoService
-import org.elasticsearch.cluster.ClusterService
 import org.elasticsearch.cluster.ClusterState
 import org.elasticsearch.cluster.block.ClusterBlockException
 import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver
+import org.elasticsearch.cluster.service.ClusterService
 import org.elasticsearch.common.inject.Inject
 import org.elasticsearch.common.settings.Settings
 import org.elasticsearch.threadpool.ThreadPool
@@ -63,7 +63,7 @@ class TransportTempestInfoAction
                 threadPool,
                 actionFilters,
                 indexNameExpressionResolver,
-                TempestInfoRequest::class.java) {
+                ::TempestInfoRequest) {
 
     override fun executor(): String = ThreadPool.Names.SAME
 
@@ -74,8 +74,8 @@ class TransportTempestInfoAction
     override fun masterOperation(request: TempestInfoRequest, state: ClusterState, listener: ActionListener<TempestInfoResponse>) {
         val response = TempestInfoResponse()
 
-        response.patternMapping = indexGroupPartitioner.patternMapping(state.routingNodes.metaData())
-        response.youngIndexes = shardSizeCalculator.youngIndexes(state.routingNodes.metaData())
+        response.patternMapping = indexGroupPartitioner.patternMapping(state.metaData())
+        response.youngIndexes = shardSizeCalculator.youngIndexes(state.metaData())
         response.lastBalanceChangeDateTime = tempestAllocator.lastBalanceChangeDateTime
         response.lastOptimalBalanceFoundDateTime = tempestAllocator.lastOptimalBalanceFoundDateTime
         response.lastRebalanceAttemptDateTime = tempestAllocator.lastRebalanceAttemptDateTime

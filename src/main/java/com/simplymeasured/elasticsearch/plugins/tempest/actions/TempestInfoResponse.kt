@@ -36,13 +36,13 @@ import org.elasticsearch.common.io.stream.ByteBufferStreamInput
 import org.elasticsearch.common.io.stream.BytesStreamOutput
 import org.elasticsearch.common.io.stream.StreamInput
 import org.elasticsearch.common.io.stream.StreamOutput
-import org.elasticsearch.common.xcontent.StatusToXContent
+import org.elasticsearch.common.xcontent.StatusToXContentObject
 import org.elasticsearch.common.xcontent.ToXContent
 import org.elasticsearch.common.xcontent.XContentBuilder
 import org.elasticsearch.rest.RestStatus
 import org.joda.time.DateTime
 
-class TempestInfoResponse: ActionResponse(), StatusToXContent {
+class TempestInfoResponse: ActionResponse(), StatusToXContentObject {
     companion object {
         val CURRENT_MODEL_VERSION = 2
     }
@@ -114,21 +114,14 @@ class TempestInfoResponse: ActionResponse(), StatusToXContent {
     }
 
     override fun writeTo(outputStream: StreamOutput) {
-        BytesStreamOutput()
-                .apply { internalWriteTo(this, this@TempestInfoResponse) }
-                .bytes()
-                .apply { outputStream.writeByteArray(this.array()) }
-    }
-
-    private fun internalWriteTo(outputStream: StreamOutput, response: TempestInfoResponse) {
         outputStream.writeVInt(CURRENT_MODEL_VERSION)
-        outputStream.writeVLong(response.lastOptimalBalanceFoundDateTime.millis)
-        outputStream.writeVLong(response.lastBalanceChangeDateTime.millis)
-        outputStream.writeVLong(response.lastRebalanceAttemptDateTime.millis)
-        outputStream.writeStringArray(response.youngIndexes.toArray(emptyArray<String>()))
-        writePatternMapping(outputStream, response.patternMapping)
-        outputStream.writeString(response.status)
-        writeNodeGroupScores(outputStream, response.lastNodeGroupScores)
+        outputStream.writeVLong(lastOptimalBalanceFoundDateTime.millis)
+        outputStream.writeVLong(lastBalanceChangeDateTime.millis)
+        outputStream.writeVLong(lastRebalanceAttemptDateTime.millis)
+        outputStream.writeStringArray(youngIndexes.toArray(emptyArray<String>()))
+        writePatternMapping(outputStream, patternMapping)
+        outputStream.writeString(status)
+        writeNodeGroupScores(outputStream, lastNodeGroupScores)
     }
 
     private fun writePatternMapping(outputStream: StreamOutput, patternMapping: Multimap<String, String>) {
