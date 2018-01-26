@@ -66,9 +66,9 @@ class TempestShardsAllocatorITests {
     @Test
     @Throws(Exception::class)
     fun testTempestShardsAllocator() {
-        runner.createIndex("index-a", Settings.settingsBuilder().put("index.number_of_replicas", "2").build())
-        runner.createIndex("index-b", Settings.settingsBuilder().put("index.number_of_replicas", "2").build())
-        runner.createIndex("index-c-123", Settings.settingsBuilder().put("index.number_of_replicas", "2").build())
+        runner.createIndex("index-a", Settings.builder().put("index.number_of_replicas", "2").build())
+        runner.createIndex("index-b", Settings.builder().put("index.number_of_replicas", "2").build())
+        runner.createIndex("index-c-123", Settings.builder().put("index.number_of_replicas", "2").build())
 
         while (true) {
         }

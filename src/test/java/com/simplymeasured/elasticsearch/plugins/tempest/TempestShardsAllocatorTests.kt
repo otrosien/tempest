@@ -26,11 +26,13 @@ package com.simplymeasured.elasticsearch.plugins.tempest
 
 import com.carrotsearch.randomizedtesting.RandomizedContext
 import com.carrotsearch.randomizedtesting.RandomizedTest.getRandom
-import com.carrotsearch.randomizedtesting.RandomizedTest.randomDouble
 import com.carrotsearch.randomizedtesting.annotations.TimeoutSuite
 import com.simplymeasured.elasticsearch.plugins.tempest.balancer.*
 import org.eclipse.collections.api.map.MutableMap
+import org.eclipse.collections.impl.factory.Lists
 import org.eclipse.collections.impl.factory.Maps
+import org.eclipse.collections.impl.factory.Sets
+import org.eclipse.collections.impl.lazy.CompositeIterable
 import org.elasticsearch.Version
 import org.elasticsearch.cluster.*
 import org.elasticsearch.cluster.metadata.IndexMetaData
@@ -40,7 +42,8 @@ import org.elasticsearch.cluster.routing.RoutingTable
 import org.elasticsearch.cluster.routing.ShardRouting
 import org.elasticsearch.cluster.routing.ShardRoutingState
 import org.elasticsearch.cluster.routing.allocation.AllocationService
-import org.elasticsearch.cluster.service.ClusterService
+import org.elasticsearch.common.collect.ImmutableOpenMap
+import org.elasticsearch.common.settings.ClusterSettings
 import org.elasticsearch.common.settings.Settings
 import org.elasticsearch.index.shard.ShardId
 import org.elasticsearch.test.gateway.NoopGatewayAllocator
@@ -57,6 +60,21 @@ import java.security.PrivilegedAction
  */
 @TimeoutSuite(millis = 30 * 60 * 1000)
 class TempestShardsAllocatorTests : ESAllocationTestCase() {
+    private val tempestSettings = Lists.mutable.of(
+            BalancerConfiguration.CONCURRENT_REBALANCE_SETTING,
+            BalancerConfiguration.EXCLUDE_GROUP_SETTING,
+            BalancerConfiguration.SEARCH_DEPTH_SETTING,
+            BalancerConfiguration.SEARCH_SCALE_FACTOR_SETTING,
+            BalancerConfiguration.BEST_NQUEUE_SIZE_SETTING,
+            BalancerConfiguration.MINIMUM_SHARD_MOVEMENT_OVERHEAD_SETTING,
+            BalancerConfiguration.MAXIMUM_ALLOWED_RISK_RATE_SETTING,
+            BalancerConfiguration.MINIMUM_NODE_SIZE_CHANGE_RATE_SETTING,
+            BalancerConfiguration.EXPUNGE_BLACKLISTED_NODES_SETTING,
+            BalancerConfiguration.SEARCH_TIME_LIMIT_SECONDS_SETTING,
+            IndexGroupPartitioner.INDEX_GROUP_PATTERN_SETTING,
+            ShardSizeCalculator.MODEL_AGE_IN_MINUTES_SETTING)
+
+    private val allSettings = CompositeIterable.with(tempestSettings, ClusterSettings.BUILT_IN_CLUSTER_SETTINGS)
 
     @Before
     fun setup() {
@@ -68,30 +86,36 @@ class TempestShardsAllocatorTests : ESAllocationTestCase() {
         // can be reproduced with -Dtests.seed=<seed-id>
         println("seed = ${RandomizedContext.current().runnerSeedAsString}")
 
-        val settings = Settings.settingsBuilder()
+        val settings = Settings.builder()
                 .put("cluster.routing.allocation.node_concurrent_recoveries", 10)
                 .put("cluster.routing.allocation.node_initial_primaries_recoveries", 10)
                 .put("cluster.routing.allocation.cluster_concurrent_rebalance", 8)
                 .build()
 
         val shardSizes = Maps.mutable.empty<String, Long>()
-        val testClusterInfo = ClusterInfo(Maps.mutable.empty(), Maps.mutable.empty(), shardSizes, Maps.mutable.empty())
-        val mockClusterService = mock(ClusterService::class.java)
+        val testClusterInfo = ClusterInfo(
+                ImmutableOpenMap.of<String, DiskUsage>(),
+                ImmutableOpenMap.of<String, DiskUsage>(),
+                ImmutableOpenMap.of<String, Long>(),
+                ImmutableOpenMap.of<ShardRouting, String>())
         val mockClusterInfoService = mock(ClusterInfoService::class.java)
-        val mockNodeSettingsService = mock(NodeSettingsService::class.java)
-        val indexGroupPartitioner = IndexGroupPartitioner(settings)
-        val shardSizeCalculator = ShardSizeCalculator(settings, indexGroupPartitioner)
+        val mockClusterSettings = ClusterSettings(settings, Sets.mutable.ofAll(allSettings))
+        val indexGroupPartitioner = IndexGroupPartitioner(settings, mockClusterSettings)
+        val shardSizeCalculator = ShardSizeCalculator(settings, mockClusterSettings, indexGroupPartitioner)
+        val balancerConfiguration = BalancerConfiguration(settings, mockClusterSettings)
         Mockito.`when`(mockClusterInfoService.clusterInfo).thenReturn(testClusterInfo)
 
         val tempestShardsAllocator = TempestShardsAllocator(
                 settings = settings,
+                balancerConfiguration = balancerConfiguration,
                 indexGroupPartitioner = indexGroupPartitioner,
                 shardSizeCalculator = shardSizeCalculator)
 
         val strategy = MockAllocationService(
                 settings,
-                randomAllocationDeciders(settings, NodeSettingsService(Settings.Builder.EMPTY_SETTINGS), getRandom()),
-                ShardsAllocators(settings, NoopGatewayAllocator.INSTANCE, tempestShardsAllocator),
+                randomAllocationDeciders(settings, mockClusterSettings, getRandom()),
+                NoopGatewayAllocator.INSTANCE,
+                tempestShardsAllocator,
                 mockClusterInfoService)
 
         var (routingTable, clusterState) = createCluster(strategy)
@@ -121,7 +145,7 @@ class TempestShardsAllocatorTests : ESAllocationTestCase() {
                 org.elasticsearch.cluster.ClusterName.DEFAULT)
                 .metaData(metaData)
                 .routingTable(routingTable)
-                .nodes(DiscoveryNodes.builder().apply { (1..(3 + randomInt(100))).forEach { this.put(newNode("node${it}")) } })
+                .nodes(DiscoveryNodes.builder().apply { (1..(3 + randomInt(100))).forEach { this.add(newNode("node${it}")) } })
                 .build()
 
         return startupCluster(routingTable, clusterState, strategy)
@@ -130,7 +154,7 @@ class TempestShardsAllocatorTests : ESAllocationTestCase() {
     fun createRandomIndex(id: String): IndexMetaData.Builder {
         return IndexMetaData
                 .builder("index-${id}")
-                .settings(Settings.settingsBuilder()
+                .settings(Settings.builder()
                         .put(IndexMetaData.SETTING_VERSION_CREATED, Version.CURRENT)
                         .put(IndexMetaData.SETTING_CREATION_DATE, DateTime().millis))
                 .numberOfShards(5 + randomInt(100))
@@ -146,7 +170,7 @@ class TempestShardsAllocatorTests : ESAllocationTestCase() {
             resultRoutingTable = strategy.reroute(resultClusterState, "reroute").routingTable()
             resultClusterState = ClusterState.builder(resultClusterState).routingTable(resultRoutingTable).build()
 
-            resultRoutingTable = strategy.applyStartedShards(resultClusterState, resultClusterState.routingNodes.shardsWithState(ShardRoutingState.INITIALIZING), false).routingTable()
+            resultRoutingTable = strategy.applyStartedShards(resultClusterState, resultClusterState.routingNodes.shardsWithState(ShardRoutingState.INITIALIZING)).routingTable()
             resultClusterState = ClusterState.builder(resultClusterState).routingTable(resultRoutingTable).build()
 
             if (resultRoutingTable.allShards().all { it.state() == ShardRoutingState.STARTED }) {

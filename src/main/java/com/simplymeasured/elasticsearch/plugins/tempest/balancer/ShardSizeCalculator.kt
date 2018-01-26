@@ -73,7 +73,7 @@ class ShardSizeCalculator
     : AbstractComponent(settings) {
 
     companion object {
-        private val MODEL_AGE_IN_MINUTES_SETTING = Setting.intSetting(TempestConstants.MODEL_AGE_MINUTES, 60*12, 0, NodeScope, Dynamic)
+        val MODEL_AGE_IN_MINUTES_SETTING = Setting.intSetting(TempestConstants.MODEL_AGE_MINUTES, 60*12, 0, NodeScope, Dynamic)
     }
 
     private var modelAgeInMinutes = MODEL_AGE_IN_MINUTES_SETTING.get(settings)

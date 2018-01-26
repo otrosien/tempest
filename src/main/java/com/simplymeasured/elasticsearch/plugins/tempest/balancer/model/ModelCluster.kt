@@ -208,7 +208,7 @@ class ModelCluster (
     override fun toString(): String {
         return modelNodes
                 .flatMap { it.shardManager.shards }
-                .map { "${it.backingShard.currentNodeId()} ${it.backingShard.index.name} ${it.backingShard.id} ${it.state} (${it.shardSizeInfo.estimatedSize}/${it.shardSizeInfo.actualSize})" }
+                .map { "${it.backingShard.currentNodeId()} ${it.backingShard.index().name} ${it.backingShard.id} ${it.state} (${it.shardSizeInfo.estimatedSize}/${it.shardSizeInfo.actualSize})" }
                 .toList()
                 .sorted()
                 .joinToString("\n")

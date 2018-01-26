@@ -73,7 +73,8 @@ class TempestPlugin(val settings: Settings) : Plugin(), ActionPlugin, ClusterPlu
                  BalancerConfiguration.MINIMUM_NODE_SIZE_CHANGE_RATE_SETTING,
                  BalancerConfiguration.EXPUNGE_BLACKLISTED_NODES_SETTING,
                  BalancerConfiguration.SEARCH_TIME_LIMIT_SECONDS_SETTING,
-                 IndexGroupPartitioner.INDEX_GROUP_PATTERN_SETTING)
+                 IndexGroupPartitioner.INDEX_GROUP_PATTERN_SETTING,
+                 ShardSizeCalculator.MODEL_AGE_IN_MINUTES_SETTING)
     }
 
     override fun createComponents(

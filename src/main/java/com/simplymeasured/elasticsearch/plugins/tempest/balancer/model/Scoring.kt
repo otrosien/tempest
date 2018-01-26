@@ -124,7 +124,7 @@ data class ShardScoreGroupDescription(
 
     fun isShardIncluded(shard: ShardRouting): Boolean =
             index == "*" ||
-            (shard.index == index && (shard.primary() && includesPrimaries || !shard.primary() && includesReplicas))
+            (shard.index().name == index && (shard.primary() && includesPrimaries || !shard.primary() && includesReplicas))
 }
 
 interface NodeShardGroupScorer {
