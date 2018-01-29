@@ -138,15 +138,15 @@ class HeuristicBalancer(    settings: Settings,
     /**
      * rebalance the cluster using a heuristic random sampling approach
      */
-    fun rebalance(): Boolean {
-        if (!rebalancePreconditionsCheck()) return false
+    fun rebalance(): BalanceDecision {
+        if (!rebalancePreconditionsCheck()) return BalanceDecision.ON_HOLD
 
         val bestMoveChain = findBestNextMoveChain(baseModelCluster)
         val nextMoveBatch = bestMoveChain.moveBatches.firstOrNull()
 
         if (nextMoveBatch == null) {
             logScoreInfo()
-            return false
+            return BalanceDecision.BALANCED
         }
 
         for (move in nextMoveBatch.moves) {
@@ -161,7 +161,7 @@ class HeuristicBalancer(    settings: Settings,
                     move.overhead)
         }
 
-        return true
+        return BalanceDecision.BALANCING
     }
 
     private fun logScoreInfo() {
@@ -337,8 +337,10 @@ class HeuristicBalancer(    settings: Settings,
      * Note: This does not leverage random sampling like the rebalance method. Instead, the goal is to get the shards
      *       allocated quickly and then let the rebalance logic move any small shards around.
      */
-    fun allocateUnassigned(): Boolean {
-        if (!routingNodes.hasUnassignedShards() || routingNodes.count() <= 1) { return false }
+    fun allocateUnassigned(): BalanceDecision {
+        if (!routingNodes.hasUnassignedShards() || routingNodes.count() <= 1) {
+            return BalanceDecision.NO_OP
+        }
 
         val unassignedShards = routingNodes.unassigned()
                                            .toList()
@@ -358,7 +360,7 @@ class HeuristicBalancer(    settings: Settings,
             }
         }
 
-        return changed
+        return if (changed) BalanceDecision.BALANCING else BalanceDecision.BALANCED
     }
 
     /**
@@ -367,10 +369,12 @@ class HeuristicBalancer(    settings: Settings,
      * Note: This does not leverage random sampling like the rebalance method. Instead, the goal is to get the shards
      *       allocated quickly and then let the rebalancer logic move any small shards around.
      */
-    fun moveShards(): Boolean {
+    fun moveShards(): BalanceDecision {
         val shardsThatMustMove = Lists.mutable.ofAll(routingNodes.shards { shouldMove(it!!) })
                                               .sortThisByLong { shardSizes[it.shardId()].estimatedSize }
                                               .reverseThis()
+        if (shardsThatMustMove.isEmpty) { return BalanceDecision.NO_OP }
+
         val modelCluster = ModelCluster(baseModelCluster)
         var changed = false
 
@@ -384,7 +388,7 @@ class HeuristicBalancer(    settings: Settings,
             }
         }
 
-        return changed
+        return if (changed) BalanceDecision.BALANCING else BalanceDecision.BALANCED
     }
 
     private fun shouldMove(shard: ShardRouting) = deciders.canRemain(shard, routingNodes.node(shard.currentNodeId()), allocation).type() == Decision.Type.NO
@@ -404,3 +408,9 @@ class HeuristicBalancer(    settings: Settings,
             deciders.canAllocate(shard, it.backingNode, allocation) != Decision.NO
 }
 
+enum class BalanceDecision {
+    BALANCING,
+    ON_HOLD,
+    BALANCED,
+    NO_OP
+}

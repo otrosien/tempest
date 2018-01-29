@@ -28,7 +28,8 @@ import com.simplymeasured.elasticsearch.plugins.tempest.balancer.*
 import com.simplymeasured.elasticsearch.plugins.tempest.balancer.model.ModelNode
 import org.eclipse.collections.api.map.MapIterable
 import org.eclipse.collections.impl.factory.Maps
-import org.elasticsearch.cluster.*
+import org.elasticsearch.cluster.ClusterInfoService
+import org.elasticsearch.cluster.ClusterService
 import org.elasticsearch.cluster.routing.allocation.FailedRerouteAllocation
 import org.elasticsearch.cluster.routing.allocation.RoutingAllocation
 import org.elasticsearch.cluster.routing.allocation.StartedRerouteAllocation
@@ -84,15 +85,7 @@ class TempestShardsAllocator
 
         return buildBalancer(allocation).run {
             updateScoreStats()
-            this.rebalance().apply {
-                if (this == true) {
-                    lastBalanceChangeDateTime = DateTime()
-                    status = "balancing"
-                } else {
-                    lastOptimalBalanceFoundDateTime = DateTime()
-                    status = "balanced"
-                }
-            }
+            this.rebalance().let { updateStatus(it) }
         }
     }
 
@@ -100,14 +93,11 @@ class TempestShardsAllocator
         return if (allocation.routingNodes().hasUnassignedShards()) {
             buildBalancer(allocation).run {
                 updateScoreStats()
-                this.allocateUnassigned().apply {
-                    if (this == true) {
-                        status = "allocating"
-                    }
-                }
+                this.allocateUnassigned().let { updateStatus(it) }
             }
         } else false
     }
+
 
     override fun applyFailedShards(allocation: FailedRerouteAllocation) {
         /* ONLY FOR GATEWAYS */
@@ -116,10 +106,30 @@ class TempestShardsAllocator
     override fun moveShards(allocation: RoutingAllocation): Boolean {
         return buildBalancer(allocation).run {
             updateScoreStats()
-            this.moveShards().apply {
-                if (this == true) {
-                    status = "moving"
-                }
+            this.moveShards().let { updateStatus(it) }
+        }
+    }
+
+    private fun updateStatus(balanceDecision: BalanceDecision): Boolean {
+        when (balanceDecision) {
+            BalanceDecision.BALANCING -> {
+                lastBalanceChangeDateTime = DateTime()
+                status = "balancing"
+                return true
+            }
+
+            BalanceDecision.ON_HOLD -> {
+                status = "on hold"
+                return false
+            }
+
+            BalanceDecision.BALANCED -> {
+                lastOptimalBalanceFoundDateTime = DateTime()
+                status = "balanced"
+                return false
+            }
+            BalanceDecision.NO_OP -> {
+                return false
             }
         }
     }
