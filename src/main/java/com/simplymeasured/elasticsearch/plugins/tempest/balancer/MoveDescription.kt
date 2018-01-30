@@ -22,15 +22,22 @@
  *
  */
 
-package com.simplymeasured.elasticsearch.plugins.tempest.balancer.model
+package com.simplymeasured.elasticsearch.plugins.tempest.balancer
 
-import com.simplymeasured.elasticsearch.plugins.tempest.balancer.MoveAction
-import org.eclipse.collections.api.RichIterable
+import com.simplymeasured.elasticsearch.plugins.tempest.balancer.model.ModelCluster
+import org.elasticsearch.index.shard.ShardId
 
-/**
- * Interface that defines a very simple decider to be during move simulations
- */
-interface MockDecider {
-    fun canMove(shard: ModelShard, destNode: ModelNode, moves: RichIterable<MoveAction>): Boolean
-    fun canAllocate(shard: ModelShard, destNode: ModelNode): Boolean
+data class MoveDescription(val sourceNodeId: String, val shardId: ShardId, val destNodeId: String) {
+    fun buildMoveAction(hypotheticalCluster: ModelCluster): MoveAction? {
+        val localSourceNode = hypotheticalCluster.modelNodes.find { it.nodeId == sourceNodeId } ?: return null
+        val localDestNode = hypotheticalCluster.modelNodes.find { it.nodeId == destNodeId } ?: return null
+        val localShard = localSourceNode.shards.find { it.backingShard.shardId() == shardId } ?: return null
+
+        return MoveAction(
+                sourceNode = localSourceNode.backingNode,
+                shard = localShard.backingShard,
+                destNode = localDestNode.backingNode,
+                overhead = localShard.shardSizeInfo.actualSize,
+                shardScoreGroupDescriptions = localShard.scoreGroupDescriptions)
+    }
 }

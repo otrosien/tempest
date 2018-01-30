@@ -25,6 +25,7 @@
 package com.simplymeasured.elasticsearch.plugins.tempest.balancer.model
 
 import com.simplymeasured.elasticsearch.plugins.tempest.balancer.MoveAction
+import org.eclipse.collections.api.RichIterable
 import org.elasticsearch.cluster.routing.ShardRoutingState
 
 /**
@@ -40,7 +41,7 @@ object MockDeciders {
             return destNode.shardManager.shards.none { it.backingShard.shardId() == shard.backingShard.shardId() }
         }
 
-        override fun canMove(shard: ModelShard, destNode: ModelNode, moves: Collection<MoveAction>): Boolean {
+        override fun canMove(shard: ModelShard, destNode: ModelNode, moves: RichIterable<MoveAction>): Boolean {
             return canAllocate(shard, destNode)
         }
     }
@@ -53,7 +54,7 @@ object MockDeciders {
             return shard.state == ShardRoutingState.UNASSIGNED
         }
 
-        override fun canMove(shard: ModelShard, destNode: ModelNode, moves: Collection<MoveAction>): Boolean {
+        override fun canMove(shard: ModelShard, destNode: ModelNode, moves: RichIterable<MoveAction>): Boolean {
             return shard.state == ShardRoutingState.STARTED
         }
     }
@@ -67,7 +68,7 @@ object MockDeciders {
     val shardIdAlreadyMoving = object : MockDecider {
         override fun canAllocate(shard: ModelShard, destNode: ModelNode): Boolean = true
 
-        override fun canMove(shard: ModelShard, destNode: ModelNode, moves: Collection<MoveAction>): Boolean {
+        override fun canMove(shard: ModelShard, destNode: ModelNode, moves: RichIterable<MoveAction>): Boolean {
             return moves.none { it.shard.shardId() == shard.backingShard.shardId() }
         }
     }

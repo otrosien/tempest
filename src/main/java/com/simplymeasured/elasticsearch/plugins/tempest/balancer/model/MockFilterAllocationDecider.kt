@@ -25,6 +25,7 @@
 package com.simplymeasured.elasticsearch.plugins.tempest.balancer.model
 
 import com.simplymeasured.elasticsearch.plugins.tempest.balancer.MoveAction
+import org.eclipse.collections.api.RichIterable
 import org.elasticsearch.cluster.node.DiscoveryNodeFilters
 import org.elasticsearch.cluster.node.DiscoveryNodeFilters.OpType.AND
 import org.elasticsearch.cluster.node.DiscoveryNodeFilters.OpType.OR
@@ -50,7 +51,7 @@ class MockFilterAllocationDecider(settings: Settings) : MockDecider {
         }
     }
 
-    override fun canMove(shard: ModelShard, destNode: ModelNode, moves: Collection<MoveAction>): Boolean {
+    override fun canMove(shard: ModelShard, destNode: ModelNode, moves: RichIterable<MoveAction>): Boolean {
         return canAllocate(shard, destNode)
     }
 }

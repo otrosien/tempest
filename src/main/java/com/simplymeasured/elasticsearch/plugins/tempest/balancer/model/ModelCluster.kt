@@ -114,6 +114,21 @@ class ModelCluster (
         return moves
     }
 
+    fun canApplyMoveActions(moves: ListIterable<MoveAction>): Boolean {
+        for (move in moves) {
+            val localSourceNode = sourceNodes.find { it.nodeId == move.sourceNode.nodeId() } ?: return false
+            val localDestNode = destinationNodes.find { it.nodeId == move.destNode.nodeId() } ?: return false
+            val localShard = localSourceNode.shards.find { it.backingShard.shardId() == move.shard.shardId() } ?: return false
+            val otherMoves = moves.reject { it == move }
+
+            if (!mockDeciders.all { it.canMove(localShard, localDestNode, otherMoves) }) {
+                return false
+            }
+        }
+
+        return true
+    }
+
     fun applyMoveChain(moveChain: MoveChain) {
         moveChain.moveBatches.forEach { applyMoveActionBatch(it, stabilize = true) }
     }
@@ -121,6 +136,7 @@ class ModelCluster (
     fun applyMoveActionBatch(moveActionBatch: MoveActionBatch, stabilize: Boolean) {
         moveActionBatch.moves.forEach { applyMoveAction(it, stabilize) }
     }
+
     fun applyMoveActions(moves: ListIterable<MoveAction>, stabilize: Boolean) {
         moves.forEach { applyMoveAction(it, stabilize) }
     }
