@@ -391,7 +391,7 @@ class HeuristicBalancer(settings: Settings,
             }
         }
 
-        return if (changed) BalanceDecision.BALANCING else BalanceDecision.BALANCED
+        return if (changed) BalanceDecision.BALANCING else BalanceDecision.NO_OP
     }
 
     /**
@@ -419,7 +419,7 @@ class HeuristicBalancer(settings: Settings,
             }
         }
 
-        return if (changed) BalanceDecision.BALANCING else BalanceDecision.BALANCED
+        return if (changed) BalanceDecision.BALANCING else BalanceDecision.NO_OP
     }
 
     private fun shouldMove(shard: ShardRouting) = deciders.canRemain(shard, routingNodes.node(shard.currentNodeId()), allocation).type() == Decision.Type.NO
