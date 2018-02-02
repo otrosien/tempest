@@ -29,4 +29,6 @@ import org.eclipse.collections.api.list.ListIterable
 /**
  * Capture the moves for a given batch plus some cluster stats assuming the batch is applied
  */
-class MoveActionBatch(val moves: ListIterable<MoveAction>, val overhead: Long, val risk: Double, val score: Double)
+class MoveActionBatch(val moves: ListIterable<MoveAction>, val overhead: Long, val risk: Double, val score: Double) {
+    fun buildMoveDescriptions(): ListIterable<MoveDescription> = moves.collect { it.buildMoveDescription() }
+}

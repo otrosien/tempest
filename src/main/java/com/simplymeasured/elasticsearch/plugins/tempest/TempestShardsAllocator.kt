@@ -26,9 +26,12 @@ package com.simplymeasured.elasticsearch.plugins.tempest
 
 import com.simplymeasured.elasticsearch.plugins.tempest.balancer.*
 import com.simplymeasured.elasticsearch.plugins.tempest.balancer.model.ModelNode
+import org.eclipse.collections.api.list.ListIterable
 import org.eclipse.collections.api.map.MapIterable
+import org.eclipse.collections.impl.factory.Lists
 import org.eclipse.collections.impl.factory.Maps
-import org.elasticsearch.cluster.*
+import org.elasticsearch.cluster.ClusterInfoService
+import org.elasticsearch.cluster.ClusterService
 import org.elasticsearch.cluster.routing.allocation.FailedRerouteAllocation
 import org.elasticsearch.cluster.routing.allocation.RoutingAllocation
 import org.elasticsearch.cluster.routing.allocation.StartedRerouteAllocation
@@ -62,6 +65,7 @@ class TempestShardsAllocator
     var lastOptimalBalanceFoundDateTime: DateTime = DateTime(0)
     var lastClusterBalanceScore: Double = 0.0
     var lastNodeGroupScores: MapIterable<String, MapIterable<String, Double>> = Maps.immutable.empty<String, MapIterable<String, Double>>()
+    var futurePreApprovedMoveDescriptionBatches: ListIterable<ListIterable<MoveDescription>> = Lists.immutable.empty()
     var status: String = "unknown"
     var random: Random = Random()
 
@@ -84,15 +88,18 @@ class TempestShardsAllocator
 
         return buildBalancer(allocation).run {
             updateScoreStats()
-            this.rebalance().apply {
-                if (this == true) {
-                    lastBalanceChangeDateTime = DateTime()
-                    status = "balancing"
-                } else {
-                    lastOptimalBalanceFoundDateTime = DateTime()
-                    status = "balanced"
-                }
-            }
+            this.rebalance()
+                    .also { updateFutureMoveDescriptions(this, it) }
+                    .let { updateStatus(it) }
+        }
+    }
+
+    private fun updateFutureMoveDescriptions(balancer: HeuristicBalancer, balanceDecision: BalanceDecision) {
+        when (balanceDecision) {
+            BalanceDecision.BALANCING -> this.futurePreApprovedMoveDescriptionBatches = balancer.futurePreApprovedMoveDescriptionBatches
+            BalanceDecision.BALANCED -> this.futurePreApprovedMoveDescriptionBatches = Lists.immutable.empty()
+            BalanceDecision.ON_HOLD -> { /* do nothing */ }
+            BalanceDecision.NO_OP -> { /* do nothing */ }
         }
     }
 
@@ -100,14 +107,13 @@ class TempestShardsAllocator
         return if (allocation.routingNodes().hasUnassignedShards()) {
             buildBalancer(allocation).run {
                 updateScoreStats()
-                this.allocateUnassigned().apply {
-                    if (this == true) {
-                        status = "allocating"
-                    }
-                }
+                this.allocateUnassigned()
+                        .also { updateFutureMoveDescriptions(this, it) }
+                        .let { updateStatus(it) }
             }
         } else false
     }
+
 
     override fun applyFailedShards(allocation: FailedRerouteAllocation) {
         /* ONLY FOR GATEWAYS */
@@ -116,10 +122,32 @@ class TempestShardsAllocator
     override fun moveShards(allocation: RoutingAllocation): Boolean {
         return buildBalancer(allocation).run {
             updateScoreStats()
-            this.moveShards().apply {
-                if (this == true) {
-                    status = "moving"
-                }
+            this.moveShards()
+                    .also { updateFutureMoveDescriptions(this, it) }
+                    .let { updateStatus(it) }
+        }
+    }
+
+    private fun updateStatus(balanceDecision: BalanceDecision): Boolean {
+        when (balanceDecision) {
+            BalanceDecision.BALANCING -> {
+                lastBalanceChangeDateTime = DateTime()
+                status = "balancing"
+                return true
+            }
+
+            BalanceDecision.ON_HOLD -> {
+                status = "on hold"
+                return false
+            }
+
+            BalanceDecision.BALANCED -> {
+                lastOptimalBalanceFoundDateTime = DateTime()
+                status = "balanced"
+                return false
+            }
+            BalanceDecision.NO_OP -> {
+                return false
             }
         }
     }
@@ -129,6 +157,7 @@ class TempestShardsAllocator
             allocation = allocation,
             shardSizeCalculator = shardSizeCalculator,
             balancerConfiguration = balancerConfiguration,
+            preApprovedMoveDescriptionBatches = futurePreApprovedMoveDescriptionBatches,
             random = random)
 
     private fun HeuristicBalancer.updateScoreStats() {

@@ -44,7 +44,7 @@ class MoveChain private constructor(val moveBatches: ListIterable<MoveActionBatc
          *
          * Likewise the risk is set to the maximum encountered risk in the optimal sublist
          */
-        fun pruneMoveChain(moveBatches: ListIterable<MoveActionBatch>) : MoveChain {
+        fun fromMoveBatches(moveBatches: ListIterable<MoveActionBatch>) : MoveChain {
             return moveBatches
                     .reject { it.moves.isEmpty }
                     .let { findOptimalLeadingSubChain(it)}

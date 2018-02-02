@@ -37,4 +37,10 @@ data class MoveAction(
         val shard: ShardRouting,
         val destNode: RoutingNode,
         val overhead: Long,
-        val shardScoreGroupDescriptions: ListIterable<ShardScoreGroupDescription>)
+        val shardScoreGroupDescriptions: ListIterable<ShardScoreGroupDescription>) {
+
+    fun buildMoveDescription(): MoveDescription = MoveDescription(
+            sourceNodeId = sourceNode.nodeId(),
+            shardId = shard.shardId(),
+            destNodeId = destNode.nodeId())
+}
