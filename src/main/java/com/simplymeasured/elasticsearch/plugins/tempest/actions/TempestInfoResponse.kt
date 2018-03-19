@@ -117,7 +117,7 @@ class TempestInfoResponse: ActionResponse(), StatusToXContent {
         BytesStreamOutput()
                 .apply { internalWriteTo(this, this@TempestInfoResponse) }
                 .bytes()
-                .apply { outputStream.writeByteArray(this.array()) }
+                .apply { outputStream.writeByteArray(this.toBytes()) }
     }
 
     private fun internalWriteTo(outputStream: StreamOutput, response: TempestInfoResponse) {
