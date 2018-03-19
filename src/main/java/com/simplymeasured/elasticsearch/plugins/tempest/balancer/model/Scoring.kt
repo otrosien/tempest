@@ -59,18 +59,18 @@ class ShardScoreGroup(
                                     totalCapacityUnits)) }
         }
 
-        fun buildGlobalShardScoreGroup(
+        private fun buildGlobalShardScoreGroup(
                 metaData: MetaData,
                 shardSizes: MapIterable<ShardId, IndexSizingGroup.ShardSizeInfo>,
                 numberOfNodes: Int,
                 totalCapacityUnits: Double): ShardScoreGroup {
-            val allIndexes = LazyIterate.adapt(metaData)
-            val indexNames = allIndexes.collect { it.index }.toSet()
+            val allOpenIndexes = LazyIterate.adapt(metaData).select { it.state == IndexMetaData.State.OPEN }
+            val indexNames = allOpenIndexes.collect { it.index }.toSet()
             val indexSizesGroupedByIndex = shardSizes
                     .keyValuesView()
                     .select { it.one.index in indexNames }
                     .aggregateBy({ it.one.index }, { 0L }, { sum, it -> it.two.estimatedSize + sum })
-            val totalShardSizes = allIndexes.sumOfLong { (1 + it.numberOfReplicas) * indexSizesGroupedByIndex[it.index] }
+            val totalShardSizes = allOpenIndexes.sumOfLong { (1 + it.numberOfReplicas) * indexSizesGroupedByIndex.getIfAbsentValue(it.index, 0) }
             val scaler = Math.log(numberOfNodes.toDouble()) / Math.log(2.0)
 
             return ShardScoreGroup(
@@ -90,7 +90,10 @@ class ShardScoreGroup(
                     .select { it.one.index == indexMetaData.index }
                     .aggregateBy({ it.one.index }, { 0L }, { sum, it -> it.two.estimatedSize + sum })
 
-            val totalPrimarySize = indexSizesGroupedByIndex[indexMetaData.index]
+            // note that it's possible for an index to be closed and thus have no known size. In these cases the best
+            // effort guess is to assume no overhead. This is far from ideal since they do contribute to disk space
+            // usage. 
+            val totalPrimarySize = indexSizesGroupedByIndex[indexMetaData.index] ?: 0
             val totalReplicaSize = indexMetaData.numberOfReplicas * totalPrimarySize
             val totalShardSizes = totalPrimarySize + totalReplicaSize
 
